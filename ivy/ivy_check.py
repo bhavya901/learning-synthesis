@@ -19,6 +19,7 @@ import ivy_theory as ith
 import ivy_transrel as itr
 import ivy_solver as islv
 import ivy_fragment as ifc
+from learnInvariant import Universe
 
 import sys
 from collections import defaultdict
@@ -309,13 +310,17 @@ def check_fcs_in_state(mod,ag,post,fcs):
             act.match_annotation(action,clauses.annot,handler)
             handler.end()
             exit(0)
+        else:
+            return None
     else:
         # print "<bhavya> type history", type(history)
-        # print "<bhavya> fcs", fcs[0].cond()
-        res = history.satisfy(axioms,gmc,filter_fcs(fcs))
-        if res is not None and diagnose.get():
-            show_counterexample(ag,post,res)   # transfer to our algo here
-    return not any(fc.failed for fc in fcs)
+        # print "<bhavya> fcs", fcs[0].cond
+        model = history.satisfy(axioms,gmc,filter_fcs(fcs))
+        if model is not None and diagnose.get():
+            show_counterexample(ag,post,model)   # transfer to our algo here
+    if model==None:
+        return None
+    return Universe(model[0])
 
 def check_conjs_in_state(mod,ag,post,indent=8):
     check_lineno = act.checked_assert.get()
@@ -340,8 +345,10 @@ def get_conjs(mod):
     return lut.Clauses(fmlas,annot=act.EmptyAnnotation())
 
 def isInvInductive(mod):
+    # returns the max size of the universe for each sort taken over actions
     checked_actions = get_checked_actions()
-    res = True
+    res = Universe({})
+    isInvInd = True
     print "\n    The following set of external actions must preserve the invariant:"
     for actname in sorted(checked_actions):
         action = mod.actions[actname]
@@ -355,10 +362,12 @@ def isInvInductive(mod):
             with itp.EvalContext(check=False): # don't check safety
                 post = ag.execute(action, pre, None, actname) # action clauses are added
                 # print "<bhavya> post clauses", type(post), post.clauses
-            if not check_conjs_in_state(mod,ag,post,indent=12):
-                res = False
-    return res
-
+            dic = check_conjs_in_state(mod,ag,post,indent=12):
+            if dic:
+                for key,value in dic.unv.iteritems():  # <TODO> verify if it shouldn't be min
+                    res.unv[key] = res.unv[key] if res.sizesof(key) >= dic.sizesof(key) else dic.unv[key]
+                isInvInd = False
+    return res, inInvInd
 
 
 def summarize_isolate(mod):
@@ -514,7 +523,7 @@ def summarize_isolate(mod):
                            with itp.EvalContext(check=False):
                                post = ag.execute_action(root,prestate=pre)
                            fail = itp.State(expr = itp.fail_expr(post.expr))
-                           if not check_safety_in_state(mod,ag,fail,report_pass=False):
+                           if check_safety_in_state(mod,ag,fail,report_pass=False):
                                some_failed = True
                                break
                     if not some_failed:
