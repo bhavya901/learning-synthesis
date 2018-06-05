@@ -36,7 +36,7 @@ def coerce_clause_to_formula(c):
         return clause_to_formula(c)
     return drop_universals(c)
 
-class Clauses(object): #<bhavya>
+class Clauses(object): #<>
     def __init__(self,fmlas=[],defs=[],annot=None):
         assert isinstance(fmlas,list)
         self.defs = defs

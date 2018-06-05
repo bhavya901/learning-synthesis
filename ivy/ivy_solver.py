@@ -42,7 +42,7 @@ def set_macro_finder(truth):
     z3.set_param('smt.macro_finder',truth)
     
 opt_incremental = iu.BooleanParameter("incremental",True)
-opt_show_vcs = iu.BooleanParameter("show_vcs",True)  #<bhavya>
+opt_show_vcs = iu.BooleanParameter("show_vcs",True)  #<>
 
 #z3.set_param('smt.mbqi.trace',True)
 opt_macro_finder = iu.BooleanParameter("macro_finder",True)
@@ -264,7 +264,7 @@ def apply_z3_func(pred,tup):
 
 def numeral_to_z3(num):
     # TODO: allow other numeric types
-    print "<bhavya> numeral_to_z3 called"
+    # print "<bhavya> numeral_to_z3 called"
     z3sort = lookup_native(num.sort,sorts,"sort")
     if z3sort == None:
         return z3.Const(num.name+':'+num.sort.name,num.sort.to_z3()) # uninterpreted sort
@@ -283,7 +283,7 @@ def enumerated_to_numeral(term):
     raise iu.IvyError(None,'Cannot interpret enumerated type "{}" as a native sort (not yet supported)'.format(term.sort.name))
 
 def term_to_z3(term):
-    # print "<bhavya> term_to_z3 called"  
+    # # print "<bhavya> term_to_z3 called"  
     if ivy_logic.is_boolean(term):
         return formula_to_z3_int(term)
     if not term.args:
@@ -352,7 +352,7 @@ def get_polymacs(op):
     return functools.partial(polymacs[op.name],op.sort)
 
 def atom_to_z3(atom):
-    # print "<bhavya> atom_to_z3 called"
+    # # print "<bhavya> atom_to_z3 called"
     if ivy_logic.is_equals(atom.rep) and ivy_logic.is_enumerated(atom.args[0]) and not use_z3_enums:
         return encode_equality(*atom.args)
     if atom.relname not in z3_predicates:
@@ -401,7 +401,7 @@ def exists(vs,z3_vs,z3_body):
     return z3.Exists(z3_vs, z3_body)
 
 def clause_to_z3(clause):
-    print "<bhavya> clause_to_z3 called"
+    # print "<bhavya> clause_to_z3 called"
     z3_literals = [literal_to_z3(lit) for lit in clause]
     z3_formula = z3.Or(z3_literals)
     variables = sorted(used_variables_clause(clause))
@@ -489,7 +489,7 @@ def formula_to_z3_closed(fmla):
         return forall(variables, z3_variables, z3_formula)
 
 def formula_to_z3(fmla):
-    # print "<bhavya>in formula_to_z3"
+    # # print "<bhavya>in formula_to_z3"
     # print fmla
     # print type(fmla)
     z3_fmla = formula_to_z3_closed(fmla)
@@ -753,7 +753,7 @@ def get_model_constant(m,t):
 def clauses_imply(clauses1, clauses2):
     """True if clauses1 imply clauses2.
     """
-    print "<bhavya> clauses_imply called"
+    # print "<bhavya> clauses_imply called"
     s = z3.Solver()
     z1 = clauses_to_z3(clauses1)
 #    print "z1 = {}".format(z1)
@@ -766,7 +766,7 @@ def clauses_imply(clauses1, clauses2):
 def clauses_imply_list(clauses1, clauses2_list):
     """True if clauses1 imply clauses2.
     """
-    print "<bhavya> clauses_imply_list called"
+    # print "<bhavya> clauses_imply_list called"
     s = z3.Solver()
     z1 = clauses_to_z3(clauses1)
 #    print "assume {}".format(clauses1)
@@ -987,7 +987,7 @@ num_check = 1
 def decide(s,atoms=None):
 #    print "solving{"
     global num_check
-    print "<bhavya> decide is called"
+    # print "<bhavya> decide is called"
     f = open("ivy"+str(num_check)+".smt2","w")
     num_check+=1
     f.write(s.to_smt2())
@@ -1023,7 +1023,9 @@ def get_small_model(clauses, sorts_to_minimize, relations_to_minimize, final_con
         assume() : if returns true, assume rather than check
 
     """
-    print "<bhavya> get_small_model called"
+    # print "<bhavya> get_small_model called"
+    import inspect
+    print "<learn> members of logic.Or",inspect.getmembers(lg.Or)
     if opt_show_vcs.get():
         print ''
         print "definitions:"
@@ -1032,21 +1034,21 @@ def get_small_model(clauses, sorts_to_minimize, relations_to_minimize, final_con
             print
         print "axioms:"
         for fmla in clauses.fmlas:
-            print fmla
+            print fmla, type(fmla)
             print
 
     s = z3.Solver()
     s.add(clauses_to_z3(clauses))
     
     # print "\n"*4
-    # print "<bhavya>just the clauses", s.to_smt2() # this only prints lhs of imply
+    # # print "<bhavya>just the clauses", s.to_smt2() # this only prints lhs of imply
     # print "\n"*4
 
     # res = decide(s)
     # if res == z3.unsat:
     #     return None
-    print "<bhavya> final_cond(in get_small_model): "
-    print "<bhavya> is anything happening"
+    # print "<bhavya> final_cond(in get_small_model): "
+    # print "<bhavya> is anything happening"
     print [fc.cond() for fc in final_cond]
     assumes = []
     if final_cond is not None:
@@ -1072,7 +1074,7 @@ def get_small_model(clauses, sorts_to_minimize, relations_to_minimize, final_con
                         print '\nassert: {}'.format(foo)
                     s.add(clauses_to_z3(foo))
                     res = decide(s)
-                    print "<bhavya> res in for loop is ", res
+                    # print "<bhavya> res in for loop is ", res
                     if res != z3.unsat:
                         if fc.sat():
                             res = z3.unsat
@@ -1087,11 +1089,11 @@ def get_small_model(clauses, sorts_to_minimize, relations_to_minimize, final_con
             res = decide(s)
     else:
         res = decide(s)
-    print "<bhavya> res is ", res
+    # print "<bhavya> res is ", res
     if res == z3.unsat:
         return None
 
-    print "<bhavya> if FAIL this should be printed"
+    # print "<bhavya> if FAIL this should be printed"
 
     if shrink:
         print "searching for a small model...",
@@ -1132,10 +1134,10 @@ def model_universe_facts(h,sort,upclose):
 
 
 def model_facts(h,ignore,clauses1,upclose=False):
-    print "<bhavya> in model_facts"
+    # print "<bhavya> in model_facts"
     # define the universe for each sort:
     uc = [fact for s in h.sorts() for fact in model_universe_facts(h,s,upclose)]
-    print "<bhavya> uc", uc
+    # print "<bhavya> uc", uc
     # values of constants in formula
     temp = [[(ivy_logic.Constant(c),
                              get_model_constant(h.model,ivy_logic.Constant(c)))]
@@ -1210,10 +1212,10 @@ def clauses_model_to_clauses(clauses1,ignore = None, implied = None,model = None
     """
 ##    print "clauses_model_to_clauses clauses1 = {}".format(clauses1)
     h = model_if_none(clauses1,implied,model)
-    print "<bahvya> in CMTC model_if_none", h
+    # print "<bhavya> in CMTC model_if_none", h
     ignore = ignore if ignore is not None else lambda x: False
     res = model_facts(h,ignore,clauses1)
-    print "<bhavya> in CMTC model_facts", res
+    # print "<bhavya> in CMTC model_facts", res
 #    print "core after mode_facts: {} ".format(unsat_core(res,true_clauses()))
     # if using numerals, replace the universe elements with them
     if numerals:
@@ -1223,7 +1225,7 @@ def clauses_model_to_clauses(clauses1,ignore = None, implied = None,model = None
     else:
         m = dict((c.rep,ivy_logic.Constant(c.rep.prefix('__')))
                  for s in h.sorts() for c in h.sort_universe(s))
-    print "<bhavya> substitute dict", m
+    # print "<bhavya> substitute dict", m
     res = substitute_constants_clauses(res,m)
 #    print "core after rename: {} ".format(unsat_core(res,true_clauses()))
 #    print "clauses_model_to_clauses res = {}".format(res)

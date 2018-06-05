@@ -559,10 +559,10 @@ class History(object):
     def __init__(self,state,maps = [],actions=[]):
         """ state is the initial state of the history """
 #        print "init: {}".format(state)
-        print "<bhavya> in History state", type(state) #tuple
+        # print "<bhavya> in History state", type(state) #tuple
         update,clauses,pre = state
-        print "<bhavya> in History post", type(clauses), clauses
-        print "<bhavya> in History actions",  actions, type(actions[0] if len(actions)!=0 else None)
+        # print "<bhavya> in History post", type(clauses), clauses
+        # print "<bhavya> in History actions",  actions, type(actions[0] if len(actions)!=0 else None)
         assert update == None and pre.is_false()
         self.maps = maps     # sequence of symbol renamings resulting from forward images
         self.post = clauses  # characteristic formula of the history
@@ -604,9 +604,9 @@ class History(object):
 
         if _get_model_clauses is None:
             _get_model_clauses = small_model_clauses
-        print "<bhavya> in satisfy"
-        print "<bhavya> axioms", type(axioms), axioms
-        print "<bhavya> final_cond", type(final_cond[0] if len(final_cond)!=0 else None)
+        # print "<bhavya> in satisfy"
+        # print "<bhavya> axioms", type(axioms), axioms
+        # print "<bhavya> final_cond", type(final_cond[0] if len(final_cond)!=0 else None)
 #        print "axioms: {}".format(axioms)
 
         # A model of the post-state embeds a valuation for each time
@@ -622,7 +622,7 @@ class History(object):
             return None
 
         print "\n"*4
-        print "<bhavya> smallest model: ", model
+        # print "<bhavya> smallest model: ", model
         print "\n"*4
 
         # we reconstruct the sub-model for each state composing the
@@ -634,23 +634,23 @@ class History(object):
             img = set(renaming[s] for s in renaming if not s.is_skolem())
             ignore = lambda s: self.ignore(s,img,renaming)
             # get the sub-mode for the given past time as a formula
-            # print "<bhavya> renaming", renaming
-            # print "<bhavya> img", img
+            # # print "<bhavya> renaming", renaming
+            # # print "<bhavya> img", img
             if isinstance(final_cond,list):
                 final_cond = or_clauses(*[fc.cond() for fc in final_cond])
             all_clauses = and_clauses(post,final_cond) if final_cond != None else post
-            # print "<bhavya> all_clauses", all_clauses
+            # # print "<bhavya> all_clauses", all_clauses
             clauses = clauses_model_to_clauses(all_clauses,ignore = ignore, model = model, numerals=use_numerals())
-            # print "<bhavya> clauses after model", type(clauses), clauses
+            # # print "<bhavya> clauses after model", type(clauses), clauses
             # map this formula into the past using inverse map
             clauses = rename_clauses(clauses,inverse_map(renaming))
-            # print "<bhavya> clauses after renaming", clauses
+            # # print "<bhavya> clauses after renaming", clauses
             # remove tautology equalities, TODO: not sure if this is correct here
             clauses = Clauses(
                 [f for f in clauses.fmlas if not is_tautology_equality(f)],
                 clauses.defs
             )
-            # print "<bhavya> clauses at end", clauses
+            # # print "<bhavya> clauses at end", clauses
             print "\n"*2
             states.append(clauses)
             try:
@@ -660,7 +660,7 @@ class History(object):
             except StopIteration:
                 break
         uvs = model.universes(numerals=use_numerals())
-        print "<bhavya> printing clauses",
+        # print "<bhavya> printing clauses",
         for clauses in states:
             print type(clauses)
             print vars(clauses)

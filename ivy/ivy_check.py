@@ -29,6 +29,7 @@ checked_action = iu.Parameter("action","")
 opt_trusted = iu.BooleanParameter("trusted",False)
 opt_mc = iu.BooleanParameter("mc",False)
 opt_trace = iu.BooleanParameter("trace",False)
+opt_learn = iu.BooleanParameter("learn",True)
 
 def display_cex(msg,ag):
     if diagnose.get():
@@ -55,7 +56,7 @@ def check_properties():
 
 def show_counterexample(ag,state,bmc_res):
     universe,path = bmc_res
-    print "<bhavya> path", path
+    # print "<bhavya> path", path
     other_art = ivy_art.AnalysisGraph()
     ag.copy_path(state,other_art,None)
     for state,value in zip(other_art.states[-len(path):],path):
@@ -136,6 +137,7 @@ def get_checked_actions():
         raise iu.IvyError(None,'{} is not an exported action'.format(cact))
     return [cact] if cact else sorted(im.module.public_actions)
 
+
 failures = 0
 
 def print_dots():
@@ -178,7 +180,7 @@ def pretty_lf(lf,indent=8):
     
 class ConjChecker(Checker):
     def __init__(self,lf,indent=8):
-        print "<bhavya> in ConjChecker", type(lf)
+        # print "<bhavya> in ConjChecker", type(lf)
         self.lf = lf
         self.indent = indent
         Checker.__init__(self,lf.formula)
@@ -278,7 +280,7 @@ class MatchHandler(object):
 
 def filter_fcs(fcs):
     global check_lineno
-    print "<bhavya> check_lineno",check_lineno # its None for semaphore.ivy
+    # print "<bhavya> check_lineno",check_lineno # its None for semaphore.ivy
     if check_lineno is None:
         return fcs
     return [fc for fc in fcs if (not isinstance(fc,ConjChecker) or fc.lf.lineno == check_lineno)]
@@ -308,8 +310,8 @@ def check_fcs_in_state(mod,ag,post,fcs):
             handler.end()
             exit(0)
     else:
-        print "<bhavya> type history", type(history)
-        print "<bhavya> fcs", fcs[0].cond()
+        # print "<bhavya> type history", type(history)
+        # print "<bhavya> fcs", fcs[0].cond()
         res = history.satisfy(axioms,gmc,filter_fcs(fcs))
         if res is not None and diagnose.get():
             show_counterexample(ag,post,res)   # transfer to our algo here
@@ -323,7 +325,7 @@ def check_conjs_in_state(mod,ag,post,indent=8):
         lcs = [sub for sub in mod.labeled_conjs if sub.lineno == check_lineno]
     else:
         lcs = mod.labeled_conjs
-    print "<bhavya> mod.labeled_conjs", lcs[0]
+    print "<bhavya> mod.labeled_conjs", lcs[0].args[1], type(lcs[0].args[1])
     return check_fcs_in_state(mod,ag,post,[ConjChecker(c,indent) for c in lcs])
 
 def check_safety_in_state(mod,ag,post,report_pass=True):
@@ -337,6 +339,27 @@ def get_conjs(mod):
     fmlas = [lf.formula for lf in mod.labeled_conjs]
     return lut.Clauses(fmlas,annot=act.EmptyAnnotation())
 
+def isInvInductive(mod):
+    checked_actions = get_checked_actions()
+    res = True
+    print "\n    The following set of external actions must preserve the invariant:"
+    for actname in sorted(checked_actions):
+        action = mod.actions[actname]
+        print "        {}{}".format(pretty_lineno(action),actname)
+        if not opt_summary.get() or opt_learn.get():
+            ag = ivy_art.AnalysisGraph()
+            pre = itp.State()
+            pre.clauses = get_conjs(mod)  # comment it to have only action clauses
+            # print "<bhavya> pre", type(pre)
+            # print "<bhavya> pre.clauses", type(pre.clauses), pre.clauses
+            with itp.EvalContext(check=False): # don't check safety
+                post = ag.execute(action, pre, None, actname) # action clauses are added
+                # print "<bhavya> post clauses", type(post), post.clauses
+            if not check_conjs_in_state(mod,ag,post,indent=12):
+                res = False
+    return res
+
+
 
 def summarize_isolate(mod):
 
@@ -346,7 +369,7 @@ def summarize_isolate(mod):
         check_lineno = None
 #   print 'check_lineno: {}'.format(check_lineno)
     # print "\n"*4
-    # print "<bhavya> print Module", mod.printModule()
+    # # print "<bhavya> print Module", mod.printModule()
     # print "\n"*4
     check = not opt_summary.get()
     subgoalmap = dict((x.id,y) for x,y in im.module.subgoals)
@@ -411,7 +434,7 @@ def summarize_isolate(mod):
         for actname,action in sorted(mod.initializers, key=lambda x: x[0]):
             print "        {}{}".format(pretty_lineno(action),actname)
 
-    if mod.labeled_conjs:
+    if mod.labeled_conjs and not opt_learn.get():
         print "\n    Initialization must establish the invariant"
         if check:
             with itp.EvalContext(check=False):
@@ -427,26 +450,11 @@ def summarize_isolate(mod):
             fail = itp.State(expr = itp.fail_expr(ag.states[0].expr))
             check_safety_in_state(mod,ag,fail)
 
-
-    checked_actions = get_checked_actions()
-
-    if checked_actions and mod.labeled_conjs:
-        print "\n    The following set of external actions must preserve the invariant:"
-        for actname in sorted(checked_actions):
-            action = mod.actions[actname]
-            print "        {}{}".format(pretty_lineno(action),actname)
-            if check:
-                ag = ivy_art.AnalysisGraph()
-                pre = itp.State()
-                pre.clauses = get_conjs(mod)  # comment it to have only action clauses
-                print "<bhavya> pre", type(pre)
-                print "<bhavya> pre.clauses", type(pre.clauses), pre.clauses
-                with itp.EvalContext(check=False): # don't check safety
-                    post = ag.execute(action, pre, None, actname) # action clauses are added
-                    print "<bhavya> post clauses", type(post), post.clauses
-                check_conjs_in_state(mod,ag,post,indent=12)
-            else:
-                print ''
+    
+    if opt_learn.get():
+        learnInv(mod)
+    else:
+        isInvInductive(mod)
             
 
 
@@ -519,7 +527,7 @@ def summarize_isolate(mod):
 def check_isolate():
     temporals = [p for p in im.module.labeled_props if p.temporal]
     mod = im.module
-    print "<bhavya> temporals:", temporals
+    # print "<bhavya> temporals:", temporals
     if temporals:
         if len(temporals) > 1:
             raise IvyError(None,'multiple temporal properties in an isolate not supported yet')
@@ -531,7 +539,7 @@ def check_isolate():
     with im.module.theory_context():
         summarize_isolate(mod)
         return
-        print "<bhavya> I don't think i am printed"
+        # print "<bhavya> I don't think i am printed"
         check_properties()
         some_temporals = any(p.temporal for p in im.module.labeled_props)
         check_temporals()
@@ -591,8 +599,8 @@ def check_module():
             
     if missing:
         raise iu.IvyError(None,"Some assertions are not checked")
-    print "<bhavya> printing isolates:", isolates
-    # im.module.printModule() #<bhavya>
+    # print "<bhavya> printing isolates:", isolates
+    # # im.module.printModule() #<bhavya>
     for isolate in isolates:
         if isolate != None and isolate in im.module.isolates:
             idef = im.module.isolates[isolate]
@@ -605,12 +613,12 @@ def check_module():
             if opt_trusted.get():
                 continue
             if opt_mc.get():
-                print "<bhavya> using ivy_mc to check isolate"
+                # print "<bhavya> using ivy_mc to check isolate"
                 import ivy_mc
                 with im.module.theory_context():
                     ivy_mc.check_isolate()
             else:
-                print "<bhavya> using ivy_check to check isolate"
+                # print "<bhavya> using ivy_check to check isolate"
                 check_isolate()
     print ''
     if failures > 0:
@@ -624,7 +632,7 @@ def main():
     ivy_alpha.test_bottom = False # this prevents a useless SAT check
     ivy_init.read_params()
     if len(sys.argv) != 2 or not sys.argv[1].endswith('ivy'):
-        print "<bhavya> printing usage"
+        # print "<bhavya> printing usage"
         usage()
     with im.Module():
         with utl.ErrorPrinter():
@@ -634,6 +642,6 @@ def main():
 
 
 if __name__ == "__main__":
-    print "<bhavya> called from cmd line"
+    # print "<bhavya> called from cmd line"
     main()
 
