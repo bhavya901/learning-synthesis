@@ -3,10 +3,12 @@ import ivy_art
 import ivy_check as icheck
 import ivy_transrel as itr
 from sklearn import tree
-from ivy_logic_utils import false_clauses, true_clauses, and_clauses, negate_clauses, Clauses
+from ivy_logic_utils import false_clauses, true_clauses, and_clauses, negate_clauses, Clauses, formula_to_clauses
+import logic
 
 # No such assumption as universe cannot be empty
-
+# <TODO> support for enumerated sort
+maxUniverse = None
 
 '''
 :returns a tuple containing universe and pure state.
@@ -37,7 +39,7 @@ def sampleNeg(mod, curInv):
 	for actname in sorted(checked_actions):
         res = sampleUtil(mod, curInv, fcs, actname)
         if res!=None:
-        	return res  #<TODO> pasing through some function to cnvt into suitable Obj
+        	return res
     return None
 
 def samplePos(mod,curInv, coincide)
@@ -50,7 +52,7 @@ def samplePos(mod,curInv, coincide)
 	for actname in sorted(checked_actions):
 		res = sampleUtil(mod, preclause, fcs, actname)
 		if res!=None:
-    		return res  #<TODO> pasing through some function to cnvt into suitable Obj
+    		return res
     return None
 
 
@@ -64,9 +66,8 @@ def learnWeekestInv(mod, clf);
 		sneg = sampleNeg(mod,curInv)
 		spos = samplePos(mod,curInv,coincide)
 		if spos==None and sneg==None:
-			break
-		clf.addSample(Sample(spos,1))
-		clf.addSample(Sample(sneg,0))
+		clf.addSample(Sample(spos,'1'))
+		clf.addSample(Sample(sneg,'0'))
 		curInv, coincide = clf.learn()
 	return curInv
 
@@ -77,8 +78,10 @@ def learnWeekestInv(mod, clf);
 def learnInv(mod):
 	while True:
 		maxunv, isInvInd = icheck.isInvInductive(mod)
-		if isInvInd: # its Inductive
+		if isInvInd: # its Inductive so nothing to do
 			break
+		global maxUniverse
+		maxUniverse = maxunv
 		featureset = constrFeatSet(mod,maxunv)
 		clf = Classifier(maxunv, featureset) 
 		newInv = learnWeekestInv(mod,clf)
@@ -86,55 +89,244 @@ def learnInv(mod):
 
 class Universe:
 	'''
-	Nothing but a dictionary containing values for each sort in the model
+	Nothing but a dictionary containing values each sort can take in the model
 	'''
 	def __init__(self, unv):
 		self.unv = {}
-		for key,value in unv.iteritems():
-			self.unv[key.name] = self.unv[key.name].append(value.name) if key.name in self.unv else [value.name]
+		for key,values in unv.iteritems():
+			for value in values
+				newv = Const(value.sort.name,value.name)
+				if key.name in self.unv: # key = sort
+					self.unv[key.name].append(newv)
+				else:
+					self.unv[key.name] = [newv]
 
 	def sizeof(self, sort):
 		return len(self.unv.get(sort,[]))
 
+	def keys(self):
+		return self.unv.keys()
+
+	def __iter__(self):
+		return self.unv
+
+	def get(self,sort,pos):
+		return self.unv[sort][pos]
+
+def enum(len,h, suffix):
+	if len==1:
+		return [[i]+suffix for i in range(h+1)]
+	if h==0:
+		return [[0]*len + suffix]
+	return enum(len,h-1,suffix)+enum(len-1,h,[h]+suffix)
+
+
 class Sample:
+	''' a Sample refers to the model returned by z3.From a model many samplePoints can be extracted	by iterating through instance variable
+	instance variable refers to the value of each universally quantified variable (for eg n1, n2)
+	currently doesn't support change in universe.
+	'''
 	def __init__(self, model, label):
 		if model is not None:
 			self.unv = Universe(model[0])
-			self.interp = model[1] #<TODO>
+			validateUnv()
+			self.interp = Interpretation(model[1][1]) 
 			self.label = label
+			self.numsort = len(self.unv.keys())
+			self.initInstance()
 
-	def SolveFormula(self,fmla,instance):
+	'''
+	: returns : Const object
+	'''
+	def SolveFormula(self,fmla):
+		if isInstance(fmla,Var):
+			spos = sortpos[fmla.sort]
+			return self.unv.get(fmla.sort, spos)
+		if isInstance(fmla, Const):
+			if self.interp.lookup(fmla):
+				return self.interp.lookup(fmla)
+			return fmla
+		if isInstance(fmla, Function):
+			argval = [SolveFormula(arg) for arg in fmla.args]
+			lookupFunc = Function(fmla.sort,fmla.name,argval)
+			return self.interp.lookup(lookupFunc)
+		if isInstance(fmla,Equality):
+			t1, t2 = SolveFormula(fmla.args[0]), SolveFormula(fmla.args[1])
+			return Const('bool','1' if t1==t2 else '0')
+
+	def validateiUnv(self):
+		global maxUniverse
+		pass 
+
+	def next(self):
+		for i in range(numsort):   
+			if self.pos[i] != len(self.enumeration[i])-1:
+				self.pos[i]+=1
+				self.instance[i] = self.enumeration[i][self.pos[i]]
+				break
+			self.pos[i] = 0
+			self.instance[i] = self.enumeration[i][self.pos[i]]
+			if i == len(numsort)-1:
+				raise StopIteration
+		return self
+
+	def __iter__(self):
+		return self
+
+
+	def initInstance(self):
+		'''
+		self.instance is a list of list. where each element represent value of all (universally quantified) variables of a sort
+		self.enumeration is a list of list of list (Wow!!). each element of enumeration is list of all instance of a sort
+		self.pos is used for next instance
+		to make sense of an instance universe is needed
+		'''
+		self.instance, self.enumeration, self.pos, self.sortpos = [], [], [], {}
+		i = 0
+		for sort in self.unv.keys(): # <TODO> check if working.
+			size = self.unv.sizeof(sort)
+			self.instance.append([0]*size)
+			self.enumeration.append(enum(size,size-1,[]))
+			self.pos.append(0) # initial value = [0]*len(leys)
+			self.sortpos[sort] = i
+			i+=1
+		assert len(self.pos) == self.numsort, "self.pos has incorrect conf"
+		assert len(self.enumeration) == self.numsort, "self.enumeration has incorrect conf"
+		assert len(self.instance) == self.numsort, "self.instance has incorrect conf"
+
+
+
+def predToivyFmla(pred):
+	if isInstance(pred, Function):
+		sorts, terms = [], []
+		for arg in pred.args:
+			term = predToivyFmla(arg)
+			terms.append(term)
+			sorts.append(term.sort)
+		sorts.append(pred.ivysort())
+		func = logic.Const(pred.name,logic.FunctionSort(sorts))
+		return logic.Apply(func,terms)
+	elif isInstance(pred,Var):
+		return logic.Const(pred.name,pred.ivysort())
+	elif isInstance(pred,Eq):
+		t1, t2 = predToivyFmla(pred.args[0]), predToivyFmla(pred.args[1])
+		return logic.Eq(t1,t1)
+	elif isInstance(pred,Const):
 		pass
-
-	def validateiUnv(instance):
-		pass
-
 
 class Classifier:
 
 	def __init__(self, unv, featureset):
 		self.featureset = featureset # list of predicate
 		self.maxunv = unv
-		self.label = [] # each element is 0('false')- or 1('true')+ or
-		self.sample = [] # each element is list containg values of feature set
+		# self.label = [] # each element is 0('false')- or 1('true')+ or
+		self.samples = []
+		self.posDataPoints = set() # each element is tuple containg values of feature set
+		self.negDataPoints = set()
+		self.cnflDataPoints = set() # samples which cannot be seperated by feature set
 		self.clf = tree.DecisionTreeClassifier()
-		self.conflict = [] # samples which cannot be seperated by feature set
 
 	def learn():
-		pass
+		clf.fit(list(self.posDataPoints)+list(self.negDataPoints), ['1']*len(self.posDataPoints)+['0']*len(self.negDataPoints))
+		return self.toClauses(), self.conflictToClause()
 
 	def addSample(self,sample):
+		'''
+		A sample is a model and label. A samplePoint is a model and label with a concrete instance. A sample generally have multiple samplePoints.
+		Each samplePoint is then converted to dataPoint which is abstraction of samplePoint by feature set.
+		'''
 		if hasattr(sample, 'unv'):  # sample is not None
-			pass # <TODO>
+			# universe has already been validated
+			self.samples.append(sample)
+			for samplePoint in sample:
+			 	dataPoint = (samplePoint.SolveFormula(fmla).val for fmla in self.featureset)
+			 	if sample.label=='1':
+			 		if dataPoint in self.cnflDataPoints or dataPoint in self.posDataPoints:
+			 			continue
+			 		if dataPoint in self.negDataPoints:
+			 			cnflDataPoints.add(dataPoint)
+			 			continue
+			 		posDataPoints.add(dataPoint)
+			 	else:
+			 		if dataPoint in self.cnflDataPoints or dataPoint in negDataPoints:
+			 			continue
+			 		if dataPoint in self.posDataPoints:
+			 			posDataPoints.remove(dataPoint)
+			 			cnflDataPoints.add(dataPoint)
+			 		negDataPoints.add(dataPoint)
 
-	def ToClauses(self):
+
+	def toClauses(self):
 		pass
 
-	def removeConflict(self):
-		pass
+	'''
+	: returns : A logic formula  
+	'''
+	def ite(self,dp):
+		andArgs = []
+		for i in range(len(dp)):
+			featval = dp[i]
+			feat = predToivyFmla(self.featureset[i])
+			if featval=='1':
+				andArgs.append(feat)
+			else:
+				andArgs.append(logic.Not(feat))
+		return logic.And(andArgs)
 
 	def conflictToClause(self):
-		pass
+		orArgs = [self.ite(dataPoint) for dataPoint in self.cnflDataPoints]
+		return logic.Or(orArgs)
+			
+
+class Interpretation:
+	"""Contains the values for each relation, function and constant in the model stored as dict"""
+	
+	'''
+	:param fmlas: is a list of formulas (logic.Or/Not/Eq/Apply) depicting value of each relation, function, Constant
+	'''
+	def __init__(self, fmlas):
+		self.valof = {}
+		for fmla in fmlas:
+			tup = self.translate(fmla)
+			if tup is None:
+				continue
+			assert isInstance(tup,tuple), "return from translate was not a tuple"
+			assert tup[0] not in self.valof, "repeated key formed via translate"
+			self.valof[tup[0]] = tup[1]
+
+
+	def translate(self,fmla):
+		if isInstance(fmla, logic.Or): # this info is captured by universe Itself
+			return None				   # No need for redundant data
+		if isInstance(fmla, logic.Apply):
+			args = [translate(term) for term in fmla.terms]
+			retsort = fmla.func.sort.range.name
+			func = Function(retsort,fmla.func.name, args)
+			if retsort=='bool':
+				return (func,Const('bool', '1'))
+			return (func,None)
+		if isInstance(fmla, logic.Const):
+			return Const(fmla.sort,fmla.name)
+		if isInstance(fmla, logic.Eq):
+			term1 = translate(fmla.t1)
+			term2 = translate(fmla.t2)
+			if isInstance(term1, tuple): # apply was there
+				return (term1[0], term2) # <TODO> assertions
+			return (term1,term2)
+		if instance(fmla,logic.Not)
+			arg = translate(fmla.body)
+			if isInstance(arg, tuple):
+				if isInstance(arg[0], Function): # of the form not(apply)
+					return (arg[0], Const('bool', '0'))
+				return None #  val1 != val2  No need to interpret this
+			assert False, "argument to Not should result in tuple"
+		assert False, "type "+str(type(fmla))+" has no transtion defined"
+	'''
+	: param term: can only be of type Function or Const
+	: returns : object of type Const or None  
+	'''
+	def lookup(self,term):
+		return self.valof.get(term,None)
 
 
 class Predicate:
@@ -142,46 +334,58 @@ class Predicate:
 	def __init__(self):
 		self.sort = ""
 
+	def ivysort(self):
+		return logic.BooleanSort() if pred.sort=='bool' else logic.UninterpretedSort(pred.sort)
+
 
 class Var(Predicate):
+	'''Is used to represent elements in instance only'''
 	# leaf
-	def __init__(self,sort, num)
+	def __init__(self,sort, name)
 		self.sort = sort # str
 		self.name = name   # str gen a number
 
 	def __repr__(self):
 		return self.sort+":n"+self.num
 
+
+
 class Const(Predicate):
 	#leaf
-	def __init__(self,sort,val):
+	def __init__(self,sort,val, name=None):
 		self.sort = sort
 		self.val = val
-
+		self.name = name
 	def __repr__(self):
 		return self.sort+":Const("+self.num+")"
 
-class Relation(Predicate):
-	def __init__(self,name,*args):
-		self.sort = 'Boolean' # TODO verify from interp
-		self.name = name
-		self.args = args
 
-	def __repr__(self):
-		return self.name+"("+",".join([repr(arg) for arg in self.args])+")"
-
+'''
+:param args: a list of Predicate(generally Const) 
+'''
 class Function(Predicate):
 	def __init__(self,sort,name,*args):
 		self.sort = sort # return sort
 		self.name = name
-		self.args = args
+		self.args = args # list of predicate
 
 	def __repr__(self):
 		return self.name+"("+",".join([repr(arg) for arg in self.args])+")"
 
-class equality(Relation):
+class Equality(Relation):  # <Note> equality is a relation. Check for breakdown
 	def __init__(self,arg1,arg2):
-		self.sort = 'Boolean'
+		self.sort = 'bool'
 		self.name = 'Eq'
 		self.args = [arg1,arg2]
 
+
+
+
+class Relation(Predicate):
+	def __init__(self,name,*args):
+		self.sort = 'bool' # TODO verify from interp
+		self.name = name
+		self.args = args
+
+	def __repr__(self):
+		return self.name+"("+",".join([repr(arg) for arg in self.args])+")"
