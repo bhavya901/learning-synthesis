@@ -2,7 +2,8 @@ import ivy_interp as itp
 import ivy_art
 import ivy_check as icheck
 import ivy_transrel as itr
-from sklearn import tree
+import sklearn.tree
+from sklearn.tree import _tree
 from ivy_logic_utils import false_clauses, true_clauses, and_clauses, negate_clauses, Clauses, formula_to_clauses
 import logic
 
@@ -76,7 +77,8 @@ def learnWeekestInv(mod, clf);
 :param mod: ivy_module.Module Object
 '''
 def learnInv(mod):
-	while True:
+	cond = True
+	while cond:
 		maxunv, isInvInd = icheck.isInvInductive(mod)
 		if isInvInd: # its Inductive so nothing to do
 			break
@@ -85,6 +87,7 @@ def learnInv(mod):
 		featureset = constrFeatSet(mod,maxunv)
 		clf = Classifier(maxunv, featureset) 
 		newInv = learnWeekestInv(mod,clf)
+		cond = False # for limiting it to one iteration <TODO> remove
 		# <TODO> modify mod
 
 class Universe:
@@ -156,7 +159,8 @@ class Sample:
 
 	def validateiUnv(self):
 		global maxUniverse
-		pass 
+		for key in self.unv.keys():
+			assert len(self.unv[key]) <= len(maxUniverse[key]), "sample has bigger univ than maxunv on sort "+key  
 
 	def next(self):
 		for i in range(numsort):   
@@ -212,7 +216,8 @@ def predToivyFmla(pred):
 		t1, t2 = predToivyFmla(pred.args[0]), predToivyFmla(pred.args[1])
 		return logic.Eq(t1,t1)
 	elif isInstance(pred,Const):
-		pass
+		assert False, "Const object are not supported yet"
+
 
 class Classifier:
 
@@ -255,9 +260,34 @@ class Classifier:
 			 			cnflDataPoints.add(dataPoint)
 			 		negDataPoints.add(dataPoint)
 
-
 	def toClauses(self):
-		pass
+		bintree = clf.tree_
+		# first we will build a formula and then build a Clause
+		def tofmla(node):
+			"""node is of type int"""
+			if bintree.children_right[node] != bintree.children_left[node]: # not a leaf
+				assert bintree.feature[node] != _tree.TREE_UNDEFINED, "parent node uses undefined feature"
+				assert isInstance(bintree.feature[node], int), "feature returned is not int"
+				feat = self.featureset[bintree.feature[node]] # object of class predicate
+				ivyFeat = predToivyFmla(feat)
+				fmlaleft = tofmla(bintree.children_left[node])
+				fmlaright = tofmla(bintree.children_right[node])
+				fl = logic.And(logic.Not(ivyFeat),fmlaleft)
+				f2 - logic.And(ivyFeat,fmlaright)
+				return logic.Or(f1,f2)
+			else: # is leaf
+				numdata = bintree.value[node][0] # gives number of data points for each class, 0 here because its a unioutput clf
+				if numdata[0]!=0:
+					assert numdata[1]==0, "leaf node has mixed data points"
+					ntype = clf._classes_[0]
+				else:
+					assert numdata[0]==0, "leaf node has mixed data points"
+					ntype = clf._classes_[1]
+				return logic.And() if ntype=='1' else logic.Or() # and with no argument is true, or with no args is false
+
+		seprfmla = tofmla(0) # 0 is the root of tree
+		return Clauses(seprfmla)
+
 
 	'''
 	: returns : A logic formula  
@@ -275,7 +305,8 @@ class Classifier:
 
 	def conflictToClause(self):
 		orArgs = [self.ite(dataPoint) for dataPoint in self.cnflDataPoints]
-		return logic.Or(orArgs)
+		fmla = logic.Or(orArgs)
+		return Clauses(fmla)
 			
 
 class Interpretation:
@@ -378,9 +409,6 @@ class Equality(Relation):  # <Note> equality is a relation. Check for breakdown
 		self.name = 'Eq'
 		self.args = [arg1,arg2]
 
-
-
-
 class Relation(Predicate):
 	def __init__(self,name,*args):
 		self.sort = 'bool' # TODO verify from interp
@@ -389,3 +417,4 @@ class Relation(Predicate):
 
 	def __repr__(self):
 		return self.name+"("+",".join([repr(arg) for arg in self.args])+")"
+
