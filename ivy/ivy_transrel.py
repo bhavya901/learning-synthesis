@@ -661,10 +661,10 @@ class History(object):
                 break
         uvs = model.universes(numerals=use_numerals())
         # print "<bhavya> printing clauses",
-        for clauses in states:
-            print type(clauses)
-            print vars(clauses)
-            print "\n"
+        # for clauses in states:
+        #     print type(clauses)
+        #     print vars(clauses)
+        #     print "\n"
 #        print "uvs: {}".format(uvs)
         return uvs, [pure_state(clauses) for clauses in reversed(states)]
 

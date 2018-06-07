@@ -19,7 +19,7 @@ import ivy_theory as ith
 import ivy_transrel as itr
 import ivy_solver as islv
 import ivy_fragment as ifc
-from learnInvariant import Universe
+from learnInvariant import Universe, learnInv
 
 import sys
 from collections import defaultdict
@@ -163,7 +163,7 @@ class Checker(object):
         global failures
         failures += 1
         self.failed = True
-        return not (diagnose.get() or opt_trace.get()) # ignore failures if not diagnosing
+        return not (diagnose.get() or opt_trace.get() or opt_learn.get()) # ignore failures if not diagnosing
     def unsat(self):
         if self.report_pass:
             print('PASS')
@@ -180,11 +180,11 @@ def pretty_lf(lf,indent=8):
     return indent*' ' + "{}{}".format(pretty_lineno(lf),pretty_label(lf.label))
     
 class ConjChecker(Checker):
-    def __init__(self,lf,indent=8):
+    def __init__(self,lf,indent=8, invert=True):
         # print "<bhavya> in ConjChecker", type(lf)
         self.lf = lf
         self.indent = indent
-        Checker.__init__(self,lf.formula)
+        Checker.__init__(self,lf.formula,invert=invert)
     def start(self):
         print pretty_lf(self.lf,self.indent),
         print_dots()
@@ -316,8 +316,9 @@ def check_fcs_in_state(mod,ag,post,fcs):
         # print "<bhavya> type history", type(history)
         # print "<bhavya> fcs", fcs[0].cond
         model = history.satisfy(axioms,gmc,filter_fcs(fcs))
+        # print "<bhavya> model after satisfy:", model
         if model is not None and diagnose.get():
-            show_counterexample(ag,post,model)   # transfer to our algo here
+            show_counterexample(ag,post,model)
     if model==None:
         return None
     return Universe(model[0])
@@ -330,7 +331,7 @@ def check_conjs_in_state(mod,ag,post,indent=8):
         lcs = [sub for sub in mod.labeled_conjs if sub.lineno == check_lineno]
     else:
         lcs = mod.labeled_conjs
-    print "<bhavya> mod.labeled_conjs", lcs[0].args[1], type(lcs[0].args[1])
+    # print "<bhavya> mod.labeled_conjs", lcs[0].args[1], type(lcs[0].args[1])
     return check_fcs_in_state(mod,ag,post,[ConjChecker(c,indent) for c in lcs])
 
 def check_safety_in_state(mod,ag,post,report_pass=True):
@@ -362,12 +363,13 @@ def isInvInductive(mod):
             with itp.EvalContext(check=False): # don't check safety
                 post = ag.execute(action, pre, None, actname) # action clauses are added
                 # print "<bhavya> post clauses", type(post), post.clauses
-            dic = check_conjs_in_state(mod,ag,post,indent=12):
+            dic = check_conjs_in_state(mod,ag,post,indent=12)
+            # print "<bhavya> in isInvInductive, dic ret:", dic
             if dic:
                 for key,value in dic.unv.iteritems():  # <TODO> verify if it shouldn't be min
-                    res.unv[key] = res.unv[key] if res.sizesof(key) >= dic.sizesof(key) else dic.unv[key]
+                    res.unv[key] = res.unv[key] if res.sizeof(key) >= dic.sizeof(key) else dic.unv[key]
                 isInvInd = False
-    return res, inInvInd
+    return res, isInvInd
 
 
 def summarize_isolate(mod):

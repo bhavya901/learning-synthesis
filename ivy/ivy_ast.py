@@ -1056,7 +1056,7 @@ class VariantDef(AST):
 class ActionDef(Definition):
     def __init__(self,atom,action,formals=[],returns=[]):
         # we rename the formals to avoid name capture
-        print "<bhavya> in ActionDef action", type(action), action
+        # print "<bhavya> in ActionDef action", type(action), action
         self.formal_params = [s.prefix('fml:') for s in formals]
         self.formal_returns = [s.prefix('fml:') for s in returns]
         if formals or returns:

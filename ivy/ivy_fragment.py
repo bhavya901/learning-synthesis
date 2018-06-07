@@ -318,7 +318,7 @@ def create_strat_map(assumes,asserts,macros):
     formula and `ast` an ast giving the origin of the formula.
 
     """
-    print "<bhavya> in create_strat_map"
+    # print "<bhavya> in create_strat_map"
     global universally_quantified_variables
     global strat_map
     global arcs

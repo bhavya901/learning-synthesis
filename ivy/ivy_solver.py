@@ -42,7 +42,7 @@ def set_macro_finder(truth):
     z3.set_param('smt.macro_finder',truth)
     
 opt_incremental = iu.BooleanParameter("incremental",True)
-opt_show_vcs = iu.BooleanParameter("show_vcs",True)  #<>
+opt_show_vcs = iu.BooleanParameter("show_vcs",False)  # <>
 
 #z3.set_param('smt.mbqi.trace',True)
 opt_macro_finder = iu.BooleanParameter("macro_finder",True)
@@ -989,7 +989,7 @@ def decide(s,atoms=None):
     global num_check
     # print "<bhavya> decide is called"
     f = open("ivy"+str(num_check)+".smt2","w")
-    num_check+=1
+    # num_check+=1
     f.write(s.to_smt2())
     f.close()
     res = s.check() if atoms == None else s.check(atoms)
@@ -1025,7 +1025,7 @@ def get_small_model(clauses, sorts_to_minimize, relations_to_minimize, final_con
     """
     # print "<bhavya> get_small_model called"
     import inspect
-    print "<learn> members of logic.Or",inspect.getmembers(lg.Or)
+    # print "<learn> members of logic.Or",inspect.getmembers(lg.Or)
     if opt_show_vcs.get():
         print ''
         print "definitions:"
@@ -1110,7 +1110,7 @@ def get_small_model(clauses, sorts_to_minimize, relations_to_minimize, final_con
                     s.pop()
         print "done"
     m = get_model(s)
-    print "model = {}".format(m)
+    # print "model = {}".format(m)
 #    f = open("ivy.smt2","w")
 #    f.write(s.to_smt2())
 #    f.close()
@@ -1143,14 +1143,14 @@ def model_facts(h,ignore,clauses1,upclose=False):
                              get_model_constant(h.model,ivy_logic.Constant(c)))]
           for c in used_constants_clauses(clauses1)
           if not ignore(c) and c not in ivy_logic.sig.constructors]
-    print "temp = {}".format(temp)
+    # print "temp = {}".format(temp)
     vc = [[ivy_logic._eq_lit(ivy_logic.Constant(c),
                              get_model_constant(h.model,ivy_logic.Constant(c)))]
           for c in used_constants_clauses(clauses1)
           if not ignore(c) and c not in ivy_logic.sig.constructors]
-    print "model_facts vc = {}".format(vc)
+    # print "model_facts vc = {}".format(vc)
     # values of relations in formula
-    print "used_relations_clauses = {}".format(used_relations_clauses(clauses1))
+    # print "used_relations_clauses = {}".format(used_relations_clauses(clauses1))
     # n is arity(int) and r is relation name (loic.Const) 
     urc = dict((ivy_logic.normalize_symbol(r),n) for r,n in used_relations_clauses(clauses1).iteritems())
     vr = [[l]
@@ -1158,8 +1158,8 @@ def model_facts(h,ignore,clauses1,upclose=False):
           if not ignore(r)
           for l in relation_model_to_clauses(h,r,n)]
     # values of functions in formula
-    print "model_facts vr = {}".format(vr), type(vr[0])
-    print "\n"*2
+    # print "model_facts vr = {}".format(vr), type(vr[0])
+    # print "\n"*2
     fns = set(f for (f,arity) in functions_clauses(clauses1) if not ignore(f) and arity >= 1)
     vf = [[l] for f in fns for l in function_model_to_clauses(h,f)]
     res = uc + vc + vr + vf
