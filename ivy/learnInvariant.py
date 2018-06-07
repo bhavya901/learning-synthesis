@@ -32,15 +32,16 @@ def sampleUtil(mod, preclause, fcs, actname):
 		gmc = lambda cls, final_cond: itr.small_model_clauses(cls,final_cond,shrink=True)
 		axioms = mod.background_theory()
 		return history.satisfy(axioms,gmc,fcs)
-		
+
 
 def sampleNeg(mod, curInv):
 	actions = sorted(mod.public_actions)
 	lcs = mod.labeled_conjs
 	fcs = [icheck.ConjChecker(c) for c in lcs]  # inverts the fmla
 	for actname in sorted(actions):
+		print "<plearn> checking for action- ", actname
 		res = sampleUtil(mod, curInv, fcs, actname)
-		if res!=None:
+		if res is not None:
 			return res
 	return None
 
@@ -49,11 +50,14 @@ def samplePos(mod, curInv, coincide):
 	lcs = mod.labeled_conjs
 	fcs = [icheck.ConjChecker(c,invert=False) for c in lcs]
 	negateci, negateCoincide = negate_clauses(curInv), negate_clauses(coincide)
+	print "<plearn> negateci, negateCoincide", negateci, negateCoincide
 	assert isinstance(negateci, Clauses) and isinstance(negateCoincide, Clauses), "negation causes type change" 
 	preclause = and_clauses(negateci, negateCoincide)
+	print "<plearn> preclause of samplePos", preclause
 	for actname in sorted(actions):
+		print "<plearn> checking for action+ ", actname
 		res = sampleUtil(mod, preclause, fcs, actname)
-		if res!=None:
+		if res is not None:
 			return res
 	return None
 
@@ -65,31 +69,26 @@ def learnWeekestInv(mod, clf):
 	'''
 	curInv, coincide =  true_clauses(), false_clauses()
 	while True:
-		sneg = sampleNeg(mod,curInv)
-		spos = samplePos(mod,curInv,coincide)
-		if spos==None and sneg==None:
+		spos, sneg = samplePos(mod,curInv,coincide), sampleNeg(mod,curInv)
+		if spos is None and sneg is None:
 			break
-		clf.addSample(Sample(spos,'1'))
-		clf.addSample(Sample(sneg,'0'))
+		spos, sneg = Sample(spos,'1'), Sample(sneg,'0')
+		print "Positive Sample: ",spos.interp if hasattr(spos, 'interp') else None
+		print "Neg Sample", sneg.interp if hasattr(sneg, 'interp') else None
+		clf.addSample(spos)
+		clf.addSample(sneg)
 		curInv, coincide = clf.learn()
+		print "current Invariant", curInv
+		print "coincide Clause", coincide
+		# a = raw_input('enter')
 	return curInv
-
-def constrFeatSet(mod,maxunv):
-	c1, c2 = Var('client', 'c0', 0), Var('client', 'c1', 1) 
-	s1 = Var('server', 's0', 0)
-	ret = []
-	ret.append(Equality(c1,c2))
-	ret.append(Function('bool', 'link', c1, s1))
-	ret.append(Function('bool', 'link', c2, s1))
-	ret.append(Function('bool', 'semaphore', s1))
-	return ret
 
 
 '''
 :param mod: ivy_module.Module Object
 '''
 def learnInv(mod):
-	print "<learn> Directed to learning Algorithm"
+	print "<plearn> Directed to learning Algorithm"
 	cond = True 
 	while cond:
 		maxunv, isInvInd = icheck.isInvInductive(mod)
@@ -100,9 +99,19 @@ def learnInv(mod):
 		featureset = constrFeatSet(mod,maxunv)
 		clf = Classifier(maxunv, featureset) 
 		newInv = learnWeekestInv(mod,clf)
-		print "<learn> new Invariant:", newInv
+		print "<plearn> new Invariant:", newInv
 		cond = False # for limiting it to one iteration <TODO> remove
 		# <TODO> modify mod
+
+def constrFeatSet(mod,maxunv):
+	c0, c1 = Var('client', 'c0', 0), Var('client', 'c1', 1) 
+	s0 = Var('server', 's0', 0)
+	ret = []
+	ret.append(Equality(c0,c1))
+	ret.append(Function('bool', 'link', c0, s0))
+	ret.append(Function('bool', 'link', c1, s0))
+	ret.append(Function('bool', 'semaphore', s0))
+	return ret
 
 def predToivyFmla(pred):
 	if isinstance(pred, Function):
@@ -112,8 +121,8 @@ def predToivyFmla(pred):
 			terms.append(term)
 			sorts.append(term.sort)
 		sorts.append(pred.ivysort())
-		func = logic.Const(pred.name,logic.FunctionSort(sorts))
-		return logic.Apply(func,terms)
+		func = logic.Const(pred.name,logic.FunctionSort(*sorts))
+		return logic.Apply(func,*terms)
 	elif isinstance(pred,Var):
 		return logic.Const(pred.name,pred.ivysort())
 	elif isinstance(pred,Equality):
@@ -121,6 +130,7 @@ def predToivyFmla(pred):
 		return logic.Eq(t1,t1)
 	elif isinstance(pred,Const):
 		assert False, "Const object are not supported yet"
+	assert False, "Can't Convert {} to ivy formula".format(pred)
 
 class Universe:
 	'''
@@ -152,6 +162,7 @@ class Universe:
 		assert sort in self.unv, "sort "+sort+" not in Universe"
 		assert pos<len(self.unv[sort]), "pos={}, sort={}, unv[sort]={}".format(pos,sort,self.unv[sort])
 		return self.unv[sort][pos]
+
 
 def enum(len,h, suffix):
 	if len==1:
@@ -201,7 +212,11 @@ class Sample:
 		for key in self.unv.keys():
 			assert len(self.unv[key]) <= len(maxUniverse[key]), "sample has bigger univ than maxunv on sort "+key  
 
+
 	def next(self):
+		if not self.hasIterated:
+			self.hasIterated = True
+			return self
 		for i in range(self.numsort):
 			if self.pos[i] != len(self.enumeration[i])-1:
 				self.pos[i]+=1
@@ -224,19 +239,21 @@ class Sample:
 		self.pos is used for next instance. it denotes for a given sort which instance in enumeration does self.instance points to
 		to make sense of an instance universe is needed
 		'''
+		global maxUniverse
 		self.instance, self.enumeration, self.pos, self.sortpos = [], [], [], {}
 		i = 0
 		for sort in self.unv.keys(): # <TODO> check if working.
+			instsize = maxUniverse.sizeof(sort) # size of the instance depends of maxUniverse
 			size = self.unv.sizeof(sort)
-			self.instance.append([0]*size)
-			self.enumeration.append(enum(size,size-1,[]))
+			self.instance.append([0]*instsize)
+			self.enumeration.append(enum(instsize,size-1,[]))
 			self.pos.append(0) # initial value = [0]*len(keys)
 			self.sortpos[sort] = i
 			i+=1
 		assert len(self.pos) == self.numsort, "self.pos has incorrect conf"
 		assert len(self.enumeration) == self.numsort, "self.enumeration has incorrect conf"
 		assert len(self.instance) == self.numsort, "self.instance has incorrect conf"
-
+		self.hasIterated = False
 
 
 
@@ -265,10 +282,12 @@ class Classifier:
 		'''
 		if hasattr(sample, 'unv'):  # sample is not None
 			# universe has already been validated
+			print "<plearn> sample will be added"
 			self.samples.append(sample)
 			for samplePoint in sample:
+				print "<plearn> samplePoint instance ",  samplePoint.instance
 				dataPoint = tuple([samplePoint.SolveFormula(fmla).val for fmla in self.featureset])
-				print "<learn> dataPoint is ", dataPoint
+				print "<plearn> dataPoint is ", dataPoint
 				if sample.label=='1':
 					if dataPoint in self.cnflDataPoints or dataPoint in self.posDataPoints:
 						continue
@@ -296,8 +315,8 @@ class Classifier:
 				ivyFeat = predToivyFmla(feat)
 				fmlaleft = tofmla(bintree.children_left[node]) # <TODO> assert that left is always false
 				fmlaright = tofmla(bintree.children_right[node])
-				fl = logic.And(logic.Not(ivyFeat),fmlaleft)
-				f2 - logic.And(ivyFeat,fmlaright)
+				f1 = logic.And(logic.Not(ivyFeat),fmlaleft)
+				f2 = logic.And(ivyFeat,fmlaright)
 				return logic.Or(f1,f2)
 			else: # is leaf
 				numdata = bintree.value[node][0] # gives number of data points for each class, 0 here because its a unioutput clf
@@ -328,7 +347,7 @@ class Classifier:
 		return logic.And(*andArgs)
 
 	def conflictToClause(self):
-		assert len(self.cnflDataPoints)==0, "conflicting data points {}".format(self.cnflDataPoints)
+		# assert len(self.cnflDataPoints)==0, "conflicting data points {}".format(self.cnflDataPoints)
 		orArgs = [self.ite(dataPoint) for dataPoint in self.cnflDataPoints]
 		fmla = logic.Or(*orArgs)
 		return Clauses([fmla])
@@ -342,7 +361,7 @@ class Interpretation:
 	'''
 	def __init__(self, fmlas):
 		self.valof = {}
-		# print "<learn> fmla", str(fmlas)
+		# print "<plearn> fmla", str(fmlas)
 		for fmla in fmlas:
 			tup = self.translate(fmla)
 			if tup is None:
@@ -400,7 +419,7 @@ class Predicate:
 		self.sort = ""
 
 	def ivysort(self):
-		return logic.BooleanSort() if pred.sort=='bool' else logic.UninterpretedSort(pred.sort)
+		return logic.BooleanSort() if self.sort=='bool' else logic.UninterpretedSort(self.sort)
 
 
 class Var(Predicate):
