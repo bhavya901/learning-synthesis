@@ -23,6 +23,7 @@ from logic import BooleanSort
 # No such assumption as universe cannot be empty <TODO>
 # <TODO> support for enumerated sort
 # <TODO> dictionary mapping Var to its assigned number
+# <TODO> action Clause for positive sample is different from Neg sample
 maxUniverse = None
 module = None
 '''
@@ -63,10 +64,10 @@ def samplePos(mod, curInv, coincide):
 	lcs = mod.labeled_conjs
 	fcs = [icheck.ConjChecker(c,invert=False) for c in lcs]
 	negateci, negateCoincide = negate_clauses(curInv), negate_clauses(coincide)
-	print "<plearn> negateci, negateCoincide", negateci, negateCoincide
+	# print "<plearn> negateci, negateCoincide", negateci, negateCoincide
 	assert isinstance(negateci, Clauses) and isinstance(negateCoincide, Clauses), "negation causes type change" 
 	preclause = and_clauses(negateci, negateCoincide)
-	print "<plearn> preclause of samplePos", preclause
+	# print "<plearn> preclause of samplePos", preclause
 	for actname in sorted(actions):
 		print "<plearn> checking for action+ ", actname
 		res = sampleUtil(mod, preclause, fcs, actname)
@@ -93,7 +94,7 @@ def learnWeekestInv(mod, clf):
 		curInv, coincide = clf.learn()
 		print "candidate Invariant", curInv
 		print "coincide Clause", coincide
-		# a = raw_input('enter')
+		a = raw_input('One iteration of loop completed, press enter:')
 	return curInv
 
 
@@ -119,6 +120,8 @@ def learnInv(mod):
 		cond = False # for limiting it to one iteration <TODO> remove
 		# <TODO> modify mod
 
+
+
 def testfunc(mod):
 	X, Z = Var('client', 'X1', 0), Var('client', 'Z1', 1)
 	Y = Var('server', 'Y1', 0)
@@ -126,8 +129,7 @@ def testfunc(mod):
 	linkfmla = predToivyFmla(Function('bool', 'link', X, Y))
 	semfmla = predToivyFmla(Function('bool', 'semaphore', Y))
 	fmla = logic.Or(eqfmla,logic.Not(linkfmla), logic.Not(semfmla)) 
-	conjs = [lf.formula for lf in mod.labeled_conjs]
-	curInv = Clauses([fmla]+conjs)
+	curInv = Clauses([fmla])
 	# spos = samplePos(mod, curInv, false_clauses())
 	sneg = sampleNeg(mod, curInv)
 	print sneg
@@ -147,8 +149,8 @@ def modifyfcs(mod):
 		# <TODO> replace vars such that corresponding quantified vars can be identified
 
 def constrFeatSet(mod,maxunv):
-	c0, c1 = Var('client', 'C0', 0), Var('client', 'C1', 1) 
-	s0 = Var('server', 'S0', 0)
+	c0, c1 = Var('client', 'Client0', 0), Var('client', 'Client1', 1) 
+	s0 = Var('server', 'Server0', 0)
 	ret = []
 	ret.append(Equality(c0,c1))
 	ret.append(Function('bool', 'link', c0, s0))
@@ -170,7 +172,7 @@ def predToivyFmla(pred):
 		return logic.Var(pred.name,pred.ivysort())
 	elif isinstance(pred,Equality):
 		t1, t2 = predToivyFmla(pred.args[0]), predToivyFmla(pred.args[1])
-		return logic.Eq(t1,t1)
+		return logic.Eq(t1,t2)
 	elif isinstance(pred,Const):
 		assert False, "Const object are not supported yet"
 	assert False, "Can't Convert {} to ivy formula".format(pred)
@@ -224,9 +226,9 @@ class Sample:
 	def __init__(self, model, label):
 		if model is not None:
 			self.unv = Universe(model[0])
-			self.validateUnv()
+			# self.validateUnv()
 			self.interp = Interpretation(model[1][0][1].fmlas) # for state 0 get fmla in clause object
-			self.resStateinterp = Interpretation(model[1][1][1].fmlas) # interpretaion of state resulted by performing action on state 0 
+			self.poststateItp = Interpretation(model[1][1][1].fmlas) # interpretaion of state resulted by performing action on state 0 
 			self.label = label
 			self.numsort = len(self.unv.keys())
 			self.initInstance()
@@ -238,6 +240,7 @@ class Sample:
 	'''
 	def solveIvyfmla(self,fmla):
 		''' Uses instance and universe to solve the formula
+			checks formula using the post state interpretation #IMP note
 		'''
 		if isinstance(fmla, logic.Not):
 			res = self.solveIvyfmla(fmla.body)
@@ -246,31 +249,36 @@ class Sample:
 		if isinstance(fmla, logic.Or):
 			solveTerms = [self.solveIvyfmla(t) for t in fmla]
 			assert all([term.sort==BooleanSort() for term in solveTerms]), "Or terms should be boolean"
-			return any([term.name=='1' for term in solveTerms])
+			val = '1' if any([term.name=='1' for term in solveTerms]) else '0'
+			return logic.Const(val,BooleanSort())
 		if isinstance(fmla, logic.And):
 			solveTerms = [self.solveIvyfmla(t) for t in fmla]
 			assert all([term.sort==BooleanSort() for term in solveTerms]), "And terms should be boolean"
-			return all([term.name=='1' for term in solveTerms])
+			val = '1' if all([term.name=='1' for term in solveTerms]) else '0'
+			return logic.Const(val,BooleanSort())
 		if isinstance(fmla, logic.Eq):
 			st1, st2 = self.solveIvyfmla(fmla.t1), self.solveIvyfmla(fmla.t2)
 			return logic.Const('1' if st1 == st2 else '0', BooleanSort())
 		if isinstance(fmla, logic.Apply):
 			solveTerms = [self.solveIvyfmla(t) for t in fmla.terms]
 			assert all([isinstance(term, logic.Const) for term in solveTerms]), "apply terms should be Const"
-			args = [Const(t) for t in solveTerms]
+			# print "<plearn> solveTerms:", [t.sort for t in solveTerms]
+			args = [Const.toConst(t) for t in solveTerms]
 			retsort = fmla.func.sort.range.name
 			lookupfunc = Function(retsort,fmla.func.name, *args)
-			ret = self.interp.lookup(lookupFunc)
-			assert ret!=None, "No interpretation for Func {} \nInterp={}".format(lookupFunc,self.interp)
+			ret = self.poststateItp.lookup(lookupfunc)
+			assert ret!=None, "No interpretation for Func {} \nInterp={}".format(lookupFunc,self.poststateItp)
 			return ret.toivy()
 		if isinstance(fmla, logic.Const): # required that quantified var extracted 
 			name = fmla.name
 			sort = fmla.sort.name
 			assert name.startswith('__'), "non skolemized const"
-			assert name[2:len(sort)+2]==sort, "Const not in desired format"
+			assert name[2:len(sort)+2].lower()==sort.lower(), "Const not in desired format"
 			num = int(name[len(sort)+2:])
 			spos = self.sortpos[sort]
-			return self.unv.get(sort, self.instance[spos][num]).toivy()
+			ret = self.unv.get(sort, self.instance[spos][num])
+			# print "<plearn> lookup answer", ret
+			return ret.toivy()
 		assert False, "{} type is not supported".format(fmla)
 	
 	'''
@@ -300,9 +308,9 @@ class Sample:
 			assert len(self.unv[key]) <= len(maxUniverse[key]), "sample has bigger univ than maxunv on sort "+key  
 
 
-	def addto(sortnum):
+	def addto(self, sortnum):
 		inst = self.instance[sortnum] # python copies list by reference
-		sort = self.sortat(sortnum)
+		sort = self.sortat[sortnum]
 		for i in range(len(inst)):
 			if inst[i]==self.unv.sizeof(sort)-1:
 				inst[i] = 0  
@@ -332,9 +340,9 @@ class Sample:
 		'''
 		global module
 		if self.label == '0':
-			interp = self.resStateinterp
-			fcs = [icheck.ConjChecker(c) for c in mod.labeled_conjs]  # inverts the fmla
-			fmlas = [fc.fmlas for fc in fcs] # fc.fmlas gives a list of predicate. 
+			interp = self.poststateItp
+			fcs = [icheck.ConjChecker(c) for c in module.labeled_conjs]  # inverts the fmla
+			fmlas = [fc.cond().fmlas for fc in fcs] # fc.fmlas gives a list of predicate. 
 		else:
 			interp = self.interp
 			fmlas = [[logic.And()]] # some positive samplePoints will repeat,Correctness is maintained
@@ -346,6 +354,7 @@ class Sample:
 				assert isinstance(ret,logic.Const), "return value is not a Const object"
 				assert isinstance(ret.sort, BooleanSort), "return is not a boolean formla"
 				assert ret.name in ["0", "1"], "return value is not in correct format"
+				print "<plearn> pred: {} \t\t result: {}".format(pred, ret.name)
 				if ret.name == "0":
 					isfmlatrue = False
 					break
@@ -406,12 +415,12 @@ class Classifier:
 		'''
 		if hasattr(sample, 'unv'):  # sample is not None
 			# universe has already been validated
-			print "<plearn> sample will be added"
+			print "<plearn> {} sample will be added".format("+" if sample.label=='1' else "-")
 			self.samples.append(sample)
 			for samplePoint in sample:
 				if not samplePoint.isValid():
 					continue
-				print "<plearn> samplePoint instance ",  samplePoint.instance
+				print "<plearn> {} samplePoint instance {}".format("+" if sample.label=='1' else "-", samplePoint.instance)
 				dataPoint = tuple([samplePoint.SolveFormula(fmla).val for fmla in self.featureset])
 				print "<plearn> dataPoint is ", dataPoint
 				if sample.label=='1':
@@ -441,16 +450,16 @@ class Classifier:
 				ivyFeat = predToivyFmla(feat)
 				fmlaleft = tofmla(bintree.children_left[node]) # <TODO> assert that left is always false
 				fmlaright = tofmla(bintree.children_right[node])
-				f1 = logic.And(logic.Not(ivyFeat),fmlaleft)
-				f2 = logic.And(ivyFeat,fmlaright)
-				return logic.Or(f1,f2)
+				f1 = simplifyAnd(logic.Not(ivyFeat),fmlaleft)
+				f2 = simplifyAnd(ivyFeat,fmlaright)
+				return simplifyOr(f1,f2)
 			else: # is leaf
 				numdata = bintree.value[node][0] # gives number of data points for each class, 0 here because its a unioutput clf
 				if numdata[0]!=0:
 					assert len(numdata)==1 or numdata[1]==0, "leaf node has mixed data points"
 					ntype = self.clf.classes_[0]
 				else:
-					assert len(numdata)==2, "clf is not a biclass clf"
+					assert len(numdata)==2 and numdata[1]!=0, "clf is not a biclass clf"
 					ntype = self.clf.classes_[1]
 				return logic.And() if ntype=='1' else logic.Or() # and with no argument is true, or with no args is false
 
@@ -473,7 +482,7 @@ class Classifier:
 		return logic.And(*andArgs)
 
 	def conflictToClause(self):
-		assert len(self.cnflDataPoints)==0, "conflicting data points {}".format(self.cnflDataPoints)
+		# assert len(self.cnflDataPoints)==0, "conflicting data points {}".format(self.cnflDataPoints)
 		orArgs = [self.ite(dataPoint) for dataPoint in self.cnflDataPoints]
 		fmla = logic.Or(*orArgs)
 		return Clauses([fmla])
@@ -573,9 +582,9 @@ class Const(Predicate):
 		self.val = val  # gen a str
 		self.name = name
 
-	def __init__(self, obj):
-		self.sort = obj.sort.name
-		self.val = obj.name 
+	@classmethod
+	def toConst(cls, obj):
+		return cls(obj.sort.name, obj.name)
 
 	def __repr__(self):
 		return self.sort+":Const("+self.val+")"
@@ -587,7 +596,7 @@ class Const(Predicate):
 		return (self.sort,self.name, self.val) == (other.sort,other.name, other.val)
 
 	def toivy(self):
-		return logic.Const(BooleanSort() if self.sort=='bool' else logic.UninterpretedSort(self.sort), self.val)
+		return logic.Const(self.val, BooleanSort() if self.sort=='bool' else logic.UninterpretedSort(self.sort))
 
 '''
 :param args: a list of Predicate(generally Const) 
@@ -641,3 +650,17 @@ class Equality(Relation):  # <Note> equality is a relation. Check for breakdown
 		return (self.sort,self.name, self.args) == (other.sort,other.name, other.args)
 
 
+
+def simplifyAnd(f1, f2):
+	if f2==logic.Or() or f1==logic.Or():
+		return logic.Or()
+	if f2==logic.And():
+		return f1
+	return logic.And(f1,f2)
+
+def simplifyOr(f1, f2):
+	if f2==logic.And() or f1==logic.And():
+		return logic.And()
+	if f2==logic.Or():
+		return f1
+	return logic.Or(f1,f2)
