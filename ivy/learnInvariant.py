@@ -20,6 +20,7 @@ from ivy_logic_utils import false_clauses, true_clauses, and_clauses, negate_cla
 import ivy_logic_utils as lut
 import logic
 from logic import BooleanSort
+from ivy_ast import LabeledFormula, Atom
 # No such assumption as universe cannot be empty <TODO>
 # <TODO> support for enumerated sort
 # <TODO> dictionary mapping Var to its assigned number
@@ -30,7 +31,6 @@ module = None
 :returns a tuple containing universe and pure state.
 	pure state is again a tuple with 2nd element a clause repr that state
 '''
-
 def sampleUtil(mod, preclause, fcs, actname):
 	'''
 	a sample created by using z3 which satsfies preclauses and final condition(fcs) where transtion 
@@ -48,29 +48,32 @@ def sampleUtil(mod, preclause, fcs, actname):
 		return history.satisfy(axioms,gmc,fcs)
 
 
-def sampleNeg(mod, curInv):
+def sampleNeg(mod, candInv):
 	actions = sorted(mod.public_actions)
 	lcs = mod.labeled_conjs
+	conjs = [Clauses([lc.formula]) for lc in lcs]
 	fcs = [icheck.ConjChecker(c) for c in lcs]  # inverts the fmla
+	preclause = and_clauses(candInv, *conjs)
 	for actname in sorted(actions):
 		print "<plearn> checking for action- ", actname
-		res = sampleUtil(mod, curInv, fcs, actname)
+		res = sampleUtil(mod, preclause, fcs, actname)
+		a = raw_input('tried for neg sample')
 		if res is not None:
 			return res
 	return None
 
-def samplePos(mod, curInv, coincide):
+def samplePos(mod, candInv, coincide):
 	actions = sorted(mod.public_actions)
 	lcs = mod.labeled_conjs
+	conjs = [Clauses([lc.formula]) for lc in lcs]
 	fcs = [icheck.ConjChecker(c,invert=False) for c in lcs]
-	negateci, negateCoincide = negate_clauses(curInv), negate_clauses(coincide)
-	# print "<plearn> negateci, negateCoincide", negateci, negateCoincide
+	negateci, negateCoincide = negate_clauses(candInv), negate_clauses(coincide)
 	assert isinstance(negateci, Clauses) and isinstance(negateCoincide, Clauses), "negation causes type change" 
-	preclause = and_clauses(negateci, negateCoincide)
-	# print "<plearn> preclause of samplePos", preclause
+	preclause = and_clauses(negateci, negateCoincide, *conjs)
 	for actname in sorted(actions):
 		print "<plearn> checking for action+ ", actname
 		res = sampleUtil(mod, preclause, fcs, actname)
+		a = raw_input('tried for pos sample')
 		if res is not None:
 			return res
 	return None
@@ -78,12 +81,12 @@ def samplePos(mod, curInv, coincide):
 
 def learnWeekestInv(mod, clf):
 	'''
-	curInv and coincide will be of type ivy_logic_utils.Clauses.
+	candInv and coincide will be of type ivy_logic_utils.Clauses.
 	coincide is a Clause object representing samples which cannot be distinguish by feature set
 	'''
-	curInv, coincide =  true_clauses(), false_clauses()
+	candInv, coincide =  true_clauses(), false_clauses()
 	while True:
-		spos, sneg = samplePos(mod,curInv,coincide), sampleNeg(mod,curInv)
+		spos, sneg = samplePos(mod,candInv,coincide), sampleNeg(mod,candInv)
 		if spos is None and sneg is None:
 			break
 		spos, sneg = Sample(spos,'1'), Sample(sneg,'0')
@@ -91,11 +94,11 @@ def learnWeekestInv(mod, clf):
 		print "Neg Sample", sneg.interp if hasattr(sneg, 'interp') else None
 		clf.addSample(spos)
 		clf.addSample(sneg)
-		curInv, coincide = clf.learn()
-		print "candidate Invariant", curInv
+		candInv, coincide = clf.learn()
+		print "candidate Invariant", candInv
 		print "coincide Clause", coincide
 		a = raw_input('One iteration of loop completed, press enter:')
-	return curInv
+	return candInv
 
 
 '''
@@ -117,8 +120,10 @@ def learnInv(mod):
 		clf = Classifier(maxunv, featureset) 
 		newInv = learnWeekestInv(mod,clf)
 		print "<plearn> new Invariant:", newInv
+		print "\n"*4
 		cond = False # for limiting it to one iteration <TODO> remove
-		# <TODO> modify mod
+		lf = LabeledFormula(*[Atom('learnedInv'), logic.And(*newInv.fmlas)])
+		mod.labeled_conjs.append(lf)  # modifying mod
 
 
 
@@ -129,9 +134,9 @@ def testfunc(mod):
 	linkfmla = predToivyFmla(Function('bool', 'link', X, Y))
 	semfmla = predToivyFmla(Function('bool', 'semaphore', Y))
 	fmla = logic.Or(eqfmla,logic.Not(linkfmla), logic.Not(semfmla)) 
-	curInv = Clauses([fmla])
-	# spos = samplePos(mod, curInv, false_clauses())
-	sneg = sampleNeg(mod, curInv)
+	candInv = Clauses([fmla])
+	# spos = samplePos(mod, candInv, false_clauses())
+	sneg = sampleNeg(mod, candInv)
 	print sneg
 	sneg = Sample(sneg,'0')
 	# spos = Sample(spos,'1')
@@ -156,6 +161,22 @@ def constrFeatSet(mod,maxunv):
 	ret.append(Function('bool', 'link', c0, s0))
 	ret.append(Function('bool', 'link', c1, s0))
 	ret.append(Function('bool', 'semaphore', s0))
+	return ret
+
+def constrFeatSetLE(mod,maxunv):
+	n0,n1 = Var('node', 'node0', 0), Var('node','node1', 1)
+	id0, id1 = Function('id', 'id', n0), Function('id', 'id', n1) 
+	ret = []
+	ret.append(Equality(n0,n1))
+	ret.append(Equality(id0,id1))
+	ret.append(Function('bool', 'leader', n0))
+	ret.append(Function('bool', 'leader', n1))
+	ret.append(Function('bool', 'pnd', id0, n0))
+	ret.append(Function('bool', 'pnd', id1, n1))
+	ret.append(Function('bool', 'pnd', id0, n1))
+	ret.append(Function('bool', 'pnd', id1, n0))
+	ret.append(Function('bool', 'le', id0, id1))
+	ret.append(Function('bool', 'le', id1, id0))
 	return ret
 
 def predToivyFmla(pred):
@@ -346,7 +367,7 @@ class Sample:
 		else:
 			interp = self.interp
 			fmlas = [[logic.And()]] # some positive samplePoints will repeat,Correctness is maintained
-			return True # <TODO> if you want not to repeat any pos samplePoint then fmlas would be ~curInv^~coincide  
+			return True # <TODO> if you want not to repeat any pos samplePoint then fmlas would be ~candInv^~coincide  
 		for fmla in fmlas: # requires to satisfy atleast one fmla
 			isfmlatrue = True
 			for pred in fmla:
