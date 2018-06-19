@@ -19,7 +19,7 @@ import ivy_init
 
 import sys
 
-diagnose = iu.BooleanParameter("diagnose",False)
+# diagnose = iu.BooleanParameter("diagnose",False)
 
     
 def usage():

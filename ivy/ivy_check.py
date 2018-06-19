@@ -19,7 +19,7 @@ import ivy_theory as ith
 import ivy_transrel as itr
 import ivy_solver as islv
 import ivy_fragment as ifc
-from learnInvariant import Universe, learnInv
+import learnInvariant as lI
 
 import sys
 from collections import defaultdict
@@ -159,13 +159,14 @@ class Checker(object):
         if self.report_pass:
             print_dots()
     def sat(self):
-        print('FAIL')
+        if not lI.silent:
+            print('FAIL')
         global failures
         failures += 1
         self.failed = True
         return not (diagnose.get() or opt_trace.get() or opt_learn.get()) # ignore failures if not diagnosing
     def unsat(self):
-        if self.report_pass:
+        if self.report_pass and not lI.silent:
             print('PASS')
     def assume(self):
         return False
@@ -186,8 +187,9 @@ class ConjChecker(Checker):
         self.indent = indent
         Checker.__init__(self,lf.formula,invert=invert)
     def start(self):
-        print pretty_lf(self.lf,self.indent),
-        print_dots()
+        if not lI.silent:
+            print pretty_lf(self.lf,self.indent),
+            print_dots()
     
 class ConjAssumer(Checker):
     def __init__(self,lf):
@@ -321,7 +323,7 @@ def check_fcs_in_state(mod,ag,post,fcs):
             show_counterexample(ag,post,model)
     if model==None:
         return None
-    return Universe(model[0])
+    return lI.Universe(model[0])
 
 def check_conjs_in_state(mod,ag,post,indent=8):
     check_lineno = act.checked_assert.get()
@@ -348,7 +350,7 @@ def get_conjs(mod):
 def isInvInductive(mod):
     # returns the max size of the universe for each sort taken over actions
     checked_actions = get_checked_actions()
-    res = Universe({})
+    res = lI.Universe({})
     isInvInd = True
     print "\n    The following set of external actions must preserve the invariant:"
     for actname in sorted(checked_actions):
@@ -463,7 +465,7 @@ def summarize_isolate(mod):
 
     
     if opt_learn.get():
-        learnInv(mod)
+        lI.learnInv(mod)
     else:
         isInvInductive(mod)
             
@@ -632,8 +634,10 @@ def check_module():
                 # print "<bhavya> using ivy_check to check isolate"
                 check_isolate()
     print ''
-    if failures > 0 and not opt.learn.get():
+    exit(0)
+    if failures > 0:
         raise iu.IvyError(None,"failed checks: {}".format(failures))
+
 
 
 def main():
@@ -653,6 +657,6 @@ def main():
 
 
 if __name__ == "__main__":
-    # print "<bhavya> called from cmd line"
     main()
+    print "<bhavya> called from cmd line"
 

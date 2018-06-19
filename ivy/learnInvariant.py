@@ -20,7 +20,9 @@ from ivy_logic_utils import false_clauses, true_clauses, and_clauses, negate_cla
 import ivy_logic_utils as lut
 import logic
 from logic import BooleanSort
-from ivy_ast import LabeledFormula, Atom
+import ivy_ast
+import display_sample as ds
+
 # No such assumption as universe cannot be empty <TODO>
 # <TODO> support for enumerated sort
 # <TODO> dictionary mapping Var to its assigned number
@@ -29,6 +31,7 @@ maxUniverse = None
 module = None
 candInv = true_clauses()
 coincide = false_clauses()
+silent = False # if True then silent the print statement in sat checking backend
 
 '''
 :returns a tuple containing universe and pure state.
@@ -96,6 +99,10 @@ def learnWeekestInv(mod, clf):
 		spos, sneg = Sample(spos,'1'), Sample(sneg,'0')
 		# print "Positive Sample: ",spos.interp if hasattr(spos, 'interp') else None
 		# print "Neg Sample", sneg.interp if hasattr(sneg, 'interp') else None
+		if hasattr(spos, 'interp'):
+			spos.displaySample()
+		if hasattr(sneg, 'interp'):
+			sneg.displaySample()	
 		clf.addSample(spos)
 		clf.addSample(sneg)
 		# print "<plearn> done adding samples"
@@ -112,29 +119,41 @@ def learnWeekestInv(mod, clf):
 :param mod: ivy_module.Module Object produced after parsing input program
 '''
 def learnInv(mod):
+	print "\n"*2
 	print "<plearn> Directed to learning Algorithm"
+	global silent
+	silent = True
 	while True:
+		print "Checking Inductiveness of the Invariant"
 		maxunv, isInvInd = icheck.isInvInductive(mod)
+		print "Invariant is{} Inductive\n".format('' if isInvInd else ' NOT')
 		if isInvInd: # its Inductive so nothing to do
+			silent = False
 			checkInitialCond(mod)
 			break
 		global maxUniverse, module
 		maxUniverse = maxunv
 		featureset = constrFeatSetCS(mod,maxunv)
+		print "Feature space = {" + ",".join(repr(feat) for feat in featureset)+"}"
 		modifyfcs(mod)
 		# testfunc(mod)
 		module = mod
-		clf = Classifier(maxunv, featureset) 
+		clf = Classifier(maxunv, featureset)
+		print "learning Invariant"
 		newInv = learnWeekestInv(mod,clf)
+		print "\n"*2
 		print "<plearn> new Invariant:", newInv
-		a = raw_input('new Invariant learned')
-		print "\n"*4
-		lf = LabeledFormula(*[Atom('learnedInv'), logic.And(*newInv.fmlas)])
+		a = raw_input('new Invariant learned, press enter to continue')
+		print "\n"*2
+		lf = ivy_ast.LabeledFormula(*[ivy_ast.Atom('learnedInv'), logic.And(*newInv.fmlas)])
 		mod.labeled_conjs.append(lf)  # modifying mod
 
 def checkInitialCond(mod):
-    print "\n    Initialization must establish the learned invariants"
-    print [Clauses([lc.formula]) for lc in mod.labeled_conjs]
+    print "\nChecking if Initialization establishes the learned invariants"
+    print "\n    Invariants are: "
+    for lc in mod.labeled_conjs:
+    	print "    {}".format(Clauses([lc.formula]))
+    print ''
     with itp.EvalContext(check=False):
         ag = ivy_art.AnalysisGraph(initializer=lambda x:None)
         icheck.check_conjs_in_state(mod,ag,ag.states[0])
@@ -437,7 +456,10 @@ class Sample:
 		self.hasIterated = False
 
 
-
+	def displaySample(self):
+		state0 = ds.getGraph(self.unv, self.interp)
+		state1 = ds.getGraph(self.unv, self.poststateItp)
+		ds.displayStates(self.label, state0, state1)
 
 
 class Classifier:
@@ -459,12 +481,13 @@ class Classifier:
 	def addSample(self,sample):
 		'''
 		A sample is a model and label. A samplePoint is a model and label with a concrete instance. A sample generally have multiple samplePoint.
-		Each samplePoint is then converted to dataPoint which is abstraction of samplePoint by feature set.
+		Each samplePoint is then converted to dataPoint which is abstraction of samplePoint by feature set i.e. value of features.
 		'''
 		if hasattr(sample, 'unv'):  # sample is not None
 			# universe has already been validated
 			print "<plearn> {} sample will be added".format("+" if sample.label=='1' else "-")
 			self.samples.append(sample)
+			newPoints = []
 			for samplePoint in sample:
 				# print "<plearn> {} samplePoint instance {}".format("+" if sample.label=='1' else "-", samplePoint.instance)
 				if not samplePoint.isValid():
@@ -478,6 +501,7 @@ class Classifier:
 						self.cnflDataPoints.add(dataPoint)
 						continue
 					self.posDataPoints.add(dataPoint)
+					newPoints.append(dataPoint)
 				else:
 					if dataPoint in self.cnflDataPoints or dataPoint in self.negDataPoints:
 						continue
@@ -485,6 +509,9 @@ class Classifier:
 						self.posDataPoints.remove(dataPoint)
 						self.cnflDataPoints.add(dataPoint)
 					self.negDataPoints.add(dataPoint)
+					newPoints.append(dataPoint)
+			print "New {} sample points added = {}".format("+" if sample.label=='1' else "-", newPoints)			
+
 
 	def toClauses(self):
 		bintree = self.clf.tree_
@@ -644,7 +671,7 @@ class Const(Predicate):
 		return self.sort+":Const("+self.val+")"
 
 	def __str__(self):
-		return self.sort+str(self.val)
+		return self.sort[:3]+str(self.val)
 
 	def __hash__(self):
 		return hash((self.sort,self.name, self.val))
@@ -701,7 +728,7 @@ class Equality(Relation):  # <Note> equality is a relation. Check for breakdown
 		self.args = [arg1,arg2]
 
 	def __repr__(self):
-		return repr(args[0])+" = "+repr(args[1])
+		return repr(self.args[0])+" = "+repr(self.args[1])
 
 	def __hash__(self):
 		return hash((self.sort,self.name, self.args))
