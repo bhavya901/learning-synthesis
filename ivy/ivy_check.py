@@ -632,7 +632,7 @@ def check_module():
                 # print "<bhavya> using ivy_check to check isolate"
                 check_isolate()
     print ''
-    if failures > 0:
+    if failures > 0 and not opt.learn.get():
         raise iu.IvyError(None,"failed checks: {}".format(failures))
 
 

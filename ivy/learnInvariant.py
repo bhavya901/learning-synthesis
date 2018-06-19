@@ -27,6 +27,9 @@ from ivy_ast import LabeledFormula, Atom
 # <TODO> action Clause for positive sample is different from Neg sample
 maxUniverse = None
 module = None
+candInv = true_clauses()
+coincide = false_clauses()
+
 '''
 :returns a tuple containing universe and pure state.
 	pure state is again a tuple with 2nd element a clause repr that state
@@ -55,9 +58,9 @@ def sampleNeg(mod, candInv):
 	fcs = [icheck.ConjChecker(c) for c in lcs]  # inverts the fmla
 	preclause = and_clauses(candInv, *conjs)
 	for actname in sorted(actions):
-		print "<plearn> checking for action- ", actname
+		# print "<plearn> checking for action- ", actname
 		res = sampleUtil(mod, preclause, fcs, actname)
-		a = raw_input('tried for neg sample')
+		# a = raw_input('tried for neg sample')
 		if res is not None:
 			return res
 	return None
@@ -71,9 +74,9 @@ def samplePos(mod, candInv, coincide):
 	assert isinstance(negateci, Clauses) and isinstance(negateCoincide, Clauses), "negation causes type change" 
 	preclause = and_clauses(negateci, negateCoincide, *conjs)
 	for actname in sorted(actions):
-		print "<plearn> checking for action+ ", actname
+		# print "<plearn> checking for action+ ", actname
 		res = sampleUtil(mod, preclause, fcs, actname)
-		a = raw_input('tried for pos sample')
+		# a = raw_input('tried for pos sample')
 		if res is not None:
 			return res
 	return None
@@ -84,20 +87,24 @@ def learnWeekestInv(mod, clf):
 	candInv and coincide will be of type ivy_logic_utils.Clauses.
 	coincide is a Clause object representing samples which cannot be distinguish by feature set
 	'''
+	global candInv, coincide
 	candInv, coincide =  true_clauses(), false_clauses()
 	while True:
 		spos, sneg = samplePos(mod,candInv,coincide), sampleNeg(mod,candInv)
 		if spos is None and sneg is None:
 			break
 		spos, sneg = Sample(spos,'1'), Sample(sneg,'0')
-		print "Positive Sample: ",spos.interp if hasattr(spos, 'interp') else None
-		print "Neg Sample", sneg.interp if hasattr(sneg, 'interp') else None
+		# print "Positive Sample: ",spos.interp if hasattr(spos, 'interp') else None
+		# print "Neg Sample", sneg.interp if hasattr(sneg, 'interp') else None
 		clf.addSample(spos)
 		clf.addSample(sneg)
+		# print "<plearn> done adding samples"
+		import sys
+		sys.stdout.flush()
 		candInv, coincide = clf.learn()
-		print "candidate Invariant", candInv
-		print "coincide Clause", coincide
-		a = raw_input('One iteration of loop completed, press enter:')
+		print "<plearn> candidate Invariant", candInv
+		# print "coincide Clause", coincide
+		# a = raw_input('One iteration of loop completed, press enter:')
 	return candInv
 
 
@@ -106,42 +113,36 @@ def learnWeekestInv(mod, clf):
 '''
 def learnInv(mod):
 	print "<plearn> Directed to learning Algorithm"
-	cond = True 
-	while cond:
+	while True:
 		maxunv, isInvInd = icheck.isInvInductive(mod)
 		if isInvInd: # its Inductive so nothing to do
+			checkInitialCond(mod)
 			break
 		global maxUniverse, module
 		maxUniverse = maxunv
-		featureset = constrFeatSet(mod,maxunv)
+		featureset = constrFeatSetCS(mod,maxunv)
 		modifyfcs(mod)
 		# testfunc(mod)
 		module = mod
 		clf = Classifier(maxunv, featureset) 
 		newInv = learnWeekestInv(mod,clf)
 		print "<plearn> new Invariant:", newInv
+		a = raw_input('new Invariant learned')
 		print "\n"*4
-		cond = False # for limiting it to one iteration <TODO> remove
 		lf = LabeledFormula(*[Atom('learnedInv'), logic.And(*newInv.fmlas)])
 		mod.labeled_conjs.append(lf)  # modifying mod
 
+def checkInitialCond(mod):
+    print "\n    Initialization must establish the learned invariants"
+    print [Clauses([lc.formula]) for lc in mod.labeled_conjs]
+    with itp.EvalContext(check=False):
+        ag = ivy_art.AnalysisGraph(initializer=lambda x:None)
+        icheck.check_conjs_in_state(mod,ag,ag.states[0])
 
 
 def testfunc(mod):
-	X, Z = Var('client', 'X1', 0), Var('client', 'Z1', 1)
-	Y = Var('server', 'Y1', 0)
-	eqfmla = predToivyFmla(Equality(X, Z))
-	linkfmla = predToivyFmla(Function('bool', 'link', X, Y))
-	semfmla = predToivyFmla(Function('bool', 'semaphore', Y))
-	fmla = logic.Or(eqfmla,logic.Not(linkfmla), logic.Not(semfmla)) 
-	candInv = Clauses([fmla])
-	# spos = samplePos(mod, candInv, false_clauses())
-	sneg = sampleNeg(mod, candInv)
-	print sneg
-	sneg = Sample(sneg,'0')
-	# spos = Sample(spos,'1')
-	print "Neg Sample", sneg.interp if hasattr(sneg, 'interp') else None
-	# print "pos Sample", spos.interp if hasattr(sneg, 'interp') else None
+	lcs = mod.labeled_conjs
+	print [lc.formula for lc in lcs]
 	exit(0)
 
 
@@ -153,7 +154,7 @@ def modifyfcs(mod):
 		vars = lut.used_variables_clauses(lc.formula)
 		# <TODO> replace vars such that corresponding quantified vars can be identified
 
-def constrFeatSet(mod,maxunv):
+def constrFeatSetCS(mod,maxunv):
 	c0, c1 = Var('client', 'Client0', 0), Var('client', 'Client1', 1) 
 	s0 = Var('server', 'Server0', 0)
 	ret = []
@@ -164,20 +165,37 @@ def constrFeatSet(mod,maxunv):
 	return ret
 
 def constrFeatSetLE(mod,maxunv):
-	n0,n1 = Var('node', 'node0', 0), Var('node','node1', 1)
-	id0, id1 = Function('id', 'id', n0), Function('id', 'id', n1) 
+	n0,n1 = Var('node', 'Node0', 0), Var('node','Node1', 1)
+	id0, id1 = Function('id', 'idn', n0), Function('id', 'idn', n1) 
 	ret = []
 	ret.append(Equality(n0,n1))
 	ret.append(Equality(id0,id1))
 	ret.append(Function('bool', 'leader', n0))
 	ret.append(Function('bool', 'leader', n1))
-	ret.append(Function('bool', 'pnd', id0, n0))
-	ret.append(Function('bool', 'pnd', id1, n1))
-	ret.append(Function('bool', 'pnd', id0, n1))
-	ret.append(Function('bool', 'pnd', id1, n0))
+	ret.append(Function('bool', 'pending', id0, n0))
+	ret.append(Function('bool', 'pending', id1, n1))
+	ret.append(Function('bool', 'pending', id0, n1))
+	ret.append(Function('bool', 'pending', id1, n0))
 	ret.append(Function('bool', 'le', id0, id1))
 	ret.append(Function('bool', 'le', id1, id0))
 	return ret
+	n2 = Var('node', 'Node0', 2)
+	id2 = Function('id', 'idn', n2)
+	ret.append(Equality(n0,n2))
+	ret.append(Equality(n1,n2))
+	ret.append(Equality(id0,id1))
+	ret.append(Equality(id0,id2))
+	ret.append(Equality(id2,id1))
+	ret.append(Function('bool', 'leader', n2))
+	ret.append(Function('bool', 'pending', id0, n2))
+	ret.append(Function('bool', 'pending', id1, n2))
+	ret.append(Function('bool', 'pending', id2, n1))
+	ret.append(Function('bool', 'pending', id2, n0))
+	ret.append(Function('bool', 'pending', id2, n2))
+	ret.append(Function('bool', 'le', id1, id2))
+	ret.append(Function('bool', 'le', id0, id2))
+	ret.append(Function('bool', 'btw', n0, n1, n2))
+
 
 def predToivyFmla(pred):
 	if isinstance(pred, Function):
@@ -247,21 +265,23 @@ class Sample:
 	def __init__(self, model, label):
 		if model is not None:
 			self.unv = Universe(model[0])
+			# print "<plearn>",self.unv.unv
 			# self.validateUnv()
 			self.interp = Interpretation(model[1][0][1].fmlas) # for state 0 get fmla in clause object
 			self.poststateItp = Interpretation(model[1][1][1].fmlas) # interpretaion of state resulted by performing action on state 0 
 			self.label = label
 			self.numsort = len(self.unv.keys())
 			self.initInstance()
+			# print "<plearn> interpretation", self.interp
 
 
 	'''
-	: param fmla: a predicate
+	: param fmla: an ivy predicate logic
 	: returns : logic.Const object
 	'''
 	def solveIvyfmla(self,fmla):
 		''' Uses instance and universe to solve the formula
-			checks formula using the post state interpretation #IMP note
+			for positive sample it uses prestate interpretaion, for neg sample it uses post state interprestation
 		'''
 		if isinstance(fmla, logic.Not):
 			res = self.solveIvyfmla(fmla.body)
@@ -287,25 +307,31 @@ class Sample:
 			args = [Const.toConst(t) for t in solveTerms]
 			retsort = fmla.func.sort.range.name
 			lookupfunc = Function(retsort,fmla.func.name, *args)
-			ret = self.poststateItp.lookup(lookupfunc)
-			assert ret!=None, "No interpretation for Func {} \nInterp={}".format(lookupFunc,self.poststateItp)
+			interp = self.interp if self.label=='1' else self.poststateItp 
+			ret = interp.lookup(lookupfunc)
+			assert ret!=None, "No interpretation for Func {} \nInterp={}".format(lookupFunc,interp)
 			return ret.toivy()
-		if isinstance(fmla, logic.Const): # required that quantified var extracted 
+		if isinstance(fmla, logic.Const): # required that quantified var in form __<sortname><id>, id is unique and starts with 0, Sortname should be capitalises
 			name = fmla.name
 			sort = fmla.sort.name
 			assert name.startswith('__'), "non skolemized const"
-			assert name[2:len(sort)+2].lower()==sort.lower(), "Const not in desired format"
+			assert name[2:len(sort)+2].lower()==sort.lower(), "Const ({},{}) not in desired format".format(fmla.name,fmla.sort.name)
 			num = int(name[len(sort)+2:])
 			spos = self.sortpos[sort]
 			ret = self.unv.get(sort, self.instance[spos][num])
 			# print "<plearn> lookup answer", ret
 			return ret.toivy()
-		assert False, "{} type is not supported".format(fmla)
+		if isinstance(fmla, logic.Implies):
+			t1, t2 = self.solveIvyfmla(fmla.t1), self.solveIvyfmla(fmla.t2)
+			assert t1.sort==BooleanSort() and t2.sort==BooleanSort() and t1.name in ['0','1'], "implies term is not of type Boolean"
+			val = '1' if t1.name=='0' or t2.name=='1' else '0'
+			return logic.Const(val, BooleanSort())
+		assert False, "{} type is not supported".format(type(fmla))
 	
 	'''
 	: returns : Const object
 	'''
-	def SolveFormula(self,fmla):
+	def solveFormula(self,fmla):
 		if isinstance(fmla,Var):
 			spos = self.sortpos[fmla.sort]
 			return self.unv.get(fmla.sort, self.instance[spos][fmla.num]) # get the number
@@ -314,13 +340,13 @@ class Sample:
 				return self.interp.lookup(fmla)
 			return fmla
 		if isinstance(fmla, Function):
-			argval = [self.SolveFormula(arg) for arg in fmla.args]
+			argval = [self.solveFormula(arg) for arg in fmla.args]
 			lookupFunc = Function(fmla.sort,fmla.name,*argval)
 			ret = self.interp.lookup(lookupFunc)
 			assert ret!=None, "No interpretation for Func {} \nInterp={}".format(lookupFunc,self.interp)
 			return ret
 		if isinstance(fmla,Equality):
-			t1, t2 = self.SolveFormula(fmla.args[0]), self.SolveFormula(fmla.args[1])
+			t1, t2 = self.solveFormula(fmla.args[0]), self.solveFormula(fmla.args[1])
 			return Const('bool','1' if t1==t2 else '0')
 
 	def validateUnv(self):
@@ -357,17 +383,18 @@ class Sample:
 	
 	def isValid(self):
 		''' Checks if the current instance is a valid samplePoint
-		Assumptions : safety Condition and Candidate Inv is Universally Quantified.
+			Assumptions : safety Condition and Candidate Inv is Universally Quantified.
 		'''
-		global module
+		global module, candInv, coincide
 		if self.label == '0':
-			interp = self.poststateItp
 			fcs = [icheck.ConjChecker(c) for c in module.labeled_conjs]  # inverts the fmla
-			fmlas = [fc.cond().fmlas for fc in fcs] # fc.fmlas gives a list of predicate. 
+			fmlas = [fc.cond().fmlas for fc in fcs] # fc.cond().fmlas gives a list of ivy predicate logic. 
 		else:
-			interp = self.interp
-			fmlas = [[logic.And()]] # some positive samplePoints will repeat,Correctness is maintained
-			return True # <TODO> if you want not to repeat any pos samplePoint then fmlas would be ~candInv^~coincide  
+			return True # It will cause repeatation of some positive samples, but it will not change the correctness of algorithm 
+			negateci, negateCoincide = negate_clauses(candInv), negate_clauses(coincide)
+			condition = and_clauses(negateci, negateCoincide)
+			fmlas = [condition.fmlas]
+			print "<plearn> printing condition to check valid positive samplePoint", condition
 		for fmla in fmlas: # requires to satisfy atleast one fmla
 			isfmlatrue = True
 			for pred in fmla:
@@ -375,7 +402,7 @@ class Sample:
 				assert isinstance(ret,logic.Const), "return value is not a Const object"
 				assert isinstance(ret.sort, BooleanSort), "return is not a boolean formla"
 				assert ret.name in ["0", "1"], "return value is not in correct format"
-				print "<plearn> pred: {} \t\t result: {}".format(pred, ret.name)
+				# print "<plearn> pred: {} \t\t result: {}".format(pred, ret.name)
 				if ret.name == "0":
 					isfmlatrue = False
 					break
@@ -416,7 +443,7 @@ class Sample:
 class Classifier:
 
 	def __init__(self, unv, featureset):
-		self.featureset = featureset # list of predicate
+		self.featureset = featureset # list of object of class Predicate
 		self.maxunv = unv
 		# self.label = [] # each element is 0('false')- or 1('true')+ or
 		self.samples = []
@@ -439,11 +466,11 @@ class Classifier:
 			print "<plearn> {} sample will be added".format("+" if sample.label=='1' else "-")
 			self.samples.append(sample)
 			for samplePoint in sample:
+				# print "<plearn> {} samplePoint instance {}".format("+" if sample.label=='1' else "-", samplePoint.instance)
 				if not samplePoint.isValid():
 					continue
-				print "<plearn> {} samplePoint instance {}".format("+" if sample.label=='1' else "-", samplePoint.instance)
-				dataPoint = tuple([samplePoint.SolveFormula(fmla).val for fmla in self.featureset])
-				print "<plearn> dataPoint is ", dataPoint
+				dataPoint = tuple([samplePoint.solveFormula(fmla).val for fmla in self.featureset])
+				# print "<plearn> dataPoint is ", dataPoint
 				if sample.label=='1':
 					if dataPoint in self.cnflDataPoints or dataPoint in self.posDataPoints:
 						continue
@@ -467,10 +494,14 @@ class Classifier:
 			if bintree.children_right[node] != bintree.children_left[node]: # not a leaf
 				assert bintree.feature[node] != _tree.TREE_UNDEFINED, "parent node uses undefined feature"
 				assert isinstance(bintree.feature[node], int), "feature returned is not int"
-				feat = self.featureset[bintree.feature[node]] # object of class predicate
+				feat = self.featureset[bintree.feature[node]] # object of class Predicate
 				ivyFeat = predToivyFmla(feat)
 				fmlaleft = tofmla(bintree.children_left[node]) # <TODO> assert that left is always false
 				fmlaright = tofmla(bintree.children_right[node])
+				if fmlaright==logic.And():
+					return simplifyOr(ivyFeat, fmlaleft)
+				if fmlaleft==logic.And():
+					return simplifyOr(logic.Not(ivyFeat), fmlaright)
 				f1 = simplifyAnd(logic.Not(ivyFeat),fmlaleft)
 				f2 = simplifyAnd(ivyFeat,fmlaright)
 				return simplifyOr(f1,f2)
@@ -560,13 +591,15 @@ class Interpretation:
 	
 	'''
 	: param term: can only be of type Function or Const
-	: returns : object of type Const or None  
+	: returns : object of type Const or None
 	'''
 	def lookup(self,term):
 		return self.valof.get(term, None)
 
 	def __repr__(self):
 		return str(self.valof)
+
+
 
 
 class Predicate:
@@ -610,6 +643,9 @@ class Const(Predicate):
 	def __repr__(self):
 		return self.sort+":Const("+self.val+")"
 
+	def __str__(self):
+		return self.sort+str(self.val)
+
 	def __hash__(self):
 		return hash((self.sort,self.name, self.val))
 
@@ -638,6 +674,9 @@ class Function(Predicate):
 
 	def __eq__(self, other):
 		return (self.sort,self.name, self.args) == (other.sort,other.name, other.args)
+
+	def arity(self):
+		return len(self.args)
 
 class Relation(Predicate):
 	def __init__(self,name,*args):

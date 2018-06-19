@@ -1049,7 +1049,7 @@ def get_small_model(clauses, sorts_to_minimize, relations_to_minimize, final_con
     #     return None
     # print "<bhavya> final_cond(in get_small_model): "
     # print "<bhavya> is anything happening"
-    print [fc.cond() for fc in final_cond]
+    # print [fc.cond() for fc in final_cond]
     assumes = []
     if final_cond is not None:
         if isinstance(final_cond,list):

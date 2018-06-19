@@ -621,9 +621,9 @@ class History(object):
 #            print "core = {}".format(unsat_core(post,true_clauses()))
             return None
 
-        print "\n"*4
+        # print "\n"*4
         # print "<bhavya> smallest model: ", model
-        print "\n"*4
+        # print "\n"*4
 
         # we reconstruct the sub-model for each state composing the
         # recorded renamings in reverse order. Here "renaming" maps
