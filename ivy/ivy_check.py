@@ -292,7 +292,7 @@ def check_fcs_in_state(mod,ag,post,fcs):
 #    iu.dbg('"foo"')
     history = ag.get_history(post)
 #    iu.dbg('history.actions')
-    gmc = lambda cls, final_cond: itr.small_model_clauses(cls,final_cond,shrink=diagnose.get())
+    gmc = lambda cls, final_cond: itr.small_model_clauses(cls,final_cond,shrink=diagnose.get() or opt_learn.get())
     axioms = im.module.background_theory()
     if opt_trace.get():
         clauses = history.post
@@ -323,6 +323,7 @@ def check_fcs_in_state(mod,ag,post,fcs):
             show_counterexample(ag,post,model)
     if model==None:
         return None
+    # print "<bhavya> model at check_fcs", model
     return lI.Universe(model[0])
 
 def check_conjs_in_state(mod,ag,post,indent=8):

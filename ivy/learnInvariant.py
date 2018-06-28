@@ -23,12 +23,13 @@ from logic import BooleanSort
 import ivy_ast
 import display_sample as ds
 
-# No such assumption as universe cannot be empty <TODO>
+# <TODO> No such assumption as universe cannot be empty
 # <TODO> support for enumerated sort
 # <TODO> dictionary mapping Var to its assigned number
 # <TODO> action Clause for positive sample is different from Neg sample
-maxUniverse = None
 module = None
+featureset = []
+numVarFS = {} # number of Variables of each sort in feature set
 candInv = true_clauses()
 coincide = false_clauses()
 silent = False # if True then silent the print statement in sat checking backend
@@ -54,38 +55,29 @@ def sampleUtil(mod, preclause, fcs, actname):
 		return history.satisfy(axioms,gmc,fcs)
 
 
-def sampleNeg(mod, candInv):
-	actions = sorted(mod.public_actions)
+def sampleNeg(mod, candInv, actname):
 	lcs = mod.labeled_conjs
 	conjs = [Clauses([lc.formula]) for lc in lcs]
 	fcs = [icheck.ConjChecker(c) for c in lcs]  # inverts the fmla
 	preclause = and_clauses(candInv, *conjs)
-	for actname in sorted(actions):
-		# print "<plearn> checking for action- ", actname
-		res = sampleUtil(mod, preclause, fcs, actname)
-		# a = raw_input('tried for neg sample')
-		if res is not None:
-			return res
-	return None
+	# print "<plearn> checking for action- ", actname
+	res = sampleUtil(mod, preclause, fcs, actname)
+	# a = raw_input('tried for neg sample')
+	return res
 
-def samplePos(mod, candInv, coincide):
-	actions = sorted(mod.public_actions)
+def samplePos(mod, candInv, coincide, actname):
 	lcs = mod.labeled_conjs
 	conjs = [Clauses([lc.formula]) for lc in lcs]
 	fcs = [icheck.ConjChecker(c,invert=False) for c in lcs]
 	negateci, negateCoincide = negate_clauses(candInv), negate_clauses(coincide)
 	assert isinstance(negateci, Clauses) and isinstance(negateCoincide, Clauses), "negation causes type change" 
 	preclause = and_clauses(negateci, negateCoincide, *conjs)
-	for actname in sorted(actions):
-		# print "<plearn> checking for action+ ", actname
-		res = sampleUtil(mod, preclause, fcs, actname)
-		# a = raw_input('tried for pos sample')
-		if res is not None:
-			return res
-	return None
+	# print "<plearn> checking for action+ ", actname
+	res = sampleUtil(mod, preclause, fcs, actname)
+	# a = raw_input('tried for pos sample')
+	return res
 
-
-def learnWeekestInv(mod, clf):
+def learnWeekestInv(mod, clf, actname):
 	'''
 	candInv and coincide will be of type ivy_logic_utils.Clauses.
 	coincide is a Clause object representing samples which cannot be distinguish by feature set
@@ -93,23 +85,25 @@ def learnWeekestInv(mod, clf):
 	global candInv, coincide
 	candInv, coincide =  true_clauses(), false_clauses()
 	while True:
-		spos, sneg = samplePos(mod,candInv,coincide), sampleNeg(mod,candInv)
+		spos, sneg = samplePos(mod,candInv,coincide, actname), sampleNeg(mod,candInv, actname)
 		if spos is None and sneg is None:
 			break
 		spos, sneg = Sample(spos,'1'), Sample(sneg,'0')
-		# print "Positive Sample: ",spos.interp if hasattr(spos, 'interp') else None
-		# print "Neg Sample", sneg.interp if hasattr(sneg, 'interp') else None
-		if hasattr(spos, 'interp'):
-			spos.displaySample()
-		if hasattr(sneg, 'interp'):
-			sneg.displaySample()	
+		print "Pos Sample", spos.unv.unvsize() if hasattr(spos, 'interp') else None
+		print "Neg Sample", sneg.unv.unvsize() if hasattr(sneg, 'interp') else None
+		# if hasattr(spos, 'interp') and len(spos.unv.unv['node'])!=len(spos.unv.unv['id']):
+		# 	print "<plearn> interp: ",spos.interp
+		# 	spos.displaySample()
+		# if hasattr(sneg, 'interp'):
+		# 	sneg.displaySample()	
 		clf.addSample(spos)
 		clf.addSample(sneg)
-		# print "<plearn> done adding samples"
+		print "<plearn> done adding samples"
 		import sys
 		sys.stdout.flush()
 		candInv, coincide = clf.learn()
 		print "<plearn> candidate Invariant", candInv
+		sys.stdout.flush()
 		# print "coincide Clause", coincide
 		# a = raw_input('One iteration of loop completed, press enter:')
 	return candInv
@@ -121,8 +115,10 @@ def learnWeekestInv(mod, clf):
 def learnInv(mod):
 	print "\n"*2
 	print "<plearn> Directed to learning Algorithm"
-	global silent
+	global silent, module
 	silent = True
+	modifyfcs(mod)
+	module = mod
 	while True:
 		print "Checking Inductiveness of the Invariant"
 		maxunv, isInvInd = icheck.isInvInductive(mod)
@@ -131,22 +127,19 @@ def learnInv(mod):
 			silent = False
 			checkInitialCond(mod)
 			break
-		global maxUniverse, module
-		maxUniverse = maxunv
-		featureset = constrFeatSetCS(mod,maxunv)
-		print "Feature space = {" + ",".join(repr(feat) for feat in featureset)+"}"
-		modifyfcs(mod)
 		# testfunc(mod)
-		module = mod
-		clf = Classifier(maxunv, featureset)
-		print "learning Invariant"
-		newInv = learnWeekestInv(mod,clf)
-		print "\n"*2
-		print "<plearn> new Invariant:", newInv
-		a = raw_input('new Invariant learned, press enter to continue')
-		print "\n"*2
-		lf = ivy_ast.LabeledFormula(*[ivy_ast.Atom('learnedInv'), logic.And(*newInv.fmlas)])
-		mod.labeled_conjs.append(lf)  # modifying mod
+		constrFeatSetLE3(mod)
+		for actname in sorted(mod.public_actions):
+			print "learning Invariant for action {}".format(actname)
+			clf = Classifier()
+			newInv = learnWeekestInv(mod,clf, actname)
+			print "\n"*2
+			print "<plearn> new Invariant:", newInv
+			a = raw_input('new Invariant learned, press enter to continue')
+			print "\n"*2
+			if newInv != true_clauses():
+				lf = ivy_ast.LabeledFormula(*[ivy_ast.Atom('learnedInv'+actname), logic.And(*newInv.fmlas)])
+				mod.labeled_conjs.append(lf)  # modifying mod and module, obj are copied by refr.
 
 def checkInitialCond(mod):
     print "\nChecking if Initialization establishes the learned invariants"
@@ -160,60 +153,84 @@ def checkInitialCond(mod):
 
 
 def testfunc(mod):
-	lcs = mod.labeled_conjs
-	print [lc.formula for lc in lcs]
+	print "<plearn> testing"
+	sneg = sampleNeg(mod, true_clauses())
+	sneg = Sample(sneg, '0')
+	if hasattr(sneg, 'interp'):
+		sneg.displaySample()
 	exit(0)
-
 
 def modifyfcs(mod):
 	''' fcs = final conditions
 	'''
 	lcs = mod.labeled_conjs
 	for lc in lcs:	
-		vars = lut.used_variables_clauses(lc.formula)
+		quant_vars = lut.used_variables_clauses(lc.formula)
+		print "var in conjs", quant_vars
 		# <TODO> replace vars such that corresponding quantified vars can be identified
 
-def constrFeatSetCS(mod,maxunv):
+def constrFeatSetCS(mod):
+	global numVarFS, featureset
 	c0, c1 = Var('client', 'Client0', 0), Var('client', 'Client1', 1) 
 	s0 = Var('server', 'Server0', 0)
-	ret = []
-	ret.append(Equality(c0,c1))
-	ret.append(Function('bool', 'link', c0, s0))
-	ret.append(Function('bool', 'link', c1, s0))
-	ret.append(Function('bool', 'semaphore', s0))
-	return ret
+	numVarFS['client'] = 2
+	numVarFS['server'] = 1
+	featureset.append(Equality(c0,c1))
+	featureset.append(Function('bool', 'link', c0, s0))
+	featureset.append(Function('bool', 'link', c1, s0))
+	featureset.append(Function('bool', 'semaphore', s0))
 
-def constrFeatSetLE(mod,maxunv):
+def constrFeatSetLE1(mod):
+	global numVarFS, featureset
+	n0 = Var('node', 'Node0', 0)
+	id0 = Function('id', 'idn', n0)
+	numVarFS['node'] = 1
+	numVarFS['id'] = 1
+	featureset.append(Function('bool', 'leader', n0))
+
+def constrFeatSetLE2(mod):
+	global numVarFS, featureset
 	n0,n1 = Var('node', 'Node0', 0), Var('node','Node1', 1)
 	id0, id1 = Function('id', 'idn', n0), Function('id', 'idn', n1) 
-	ret = []
-	ret.append(Equality(n0,n1))
-	ret.append(Equality(id0,id1))
-	ret.append(Function('bool', 'leader', n0))
-	ret.append(Function('bool', 'leader', n1))
-	ret.append(Function('bool', 'pending', id0, n0))
-	ret.append(Function('bool', 'pending', id1, n1))
-	ret.append(Function('bool', 'pending', id0, n1))
-	ret.append(Function('bool', 'pending', id1, n0))
-	ret.append(Function('bool', 'le', id0, id1))
-	ret.append(Function('bool', 'le', id1, id0))
-	return ret
-	n2 = Var('node', 'Node0', 2)
+	numVarFS['node'] = 2
+	numVarFS['id'] = 2
+	featureset.append(Equality(n0,n1))
+	featureset.append(Equality(id0,id1))
+	featureset.append(Function('bool', 'leader', n0))
+	featureset.append(Function('bool', 'leader', n1))
+	featureset.append(Function('bool', 'pending', id0, n0))
+	featureset.append(Function('bool', 'pending', id1, n1))
+	featureset.append(Function('bool', 'pending', id0, n1))
+	featureset.append(Function('bool', 'pending', id1, n0))
+	featureset.append(Function('bool', 'le', id0, id1))
+	featureset.append(Function('bool', 'le', id1, id0))
+
+def constrFeatSetLE3(mod):
+	n0,n1 = Var('node', 'Node0', 0), Var('node','Node1', 1)
+	id0, id1 = Function('id', 'idn', n0), Function('id', 'idn', n1)
+	n2 = Var('node', 'Node2', 2)
 	id2 = Function('id', 'idn', n2)
-	ret.append(Equality(n0,n2))
-	ret.append(Equality(n1,n2))
-	ret.append(Equality(id0,id1))
-	ret.append(Equality(id0,id2))
-	ret.append(Equality(id2,id1))
-	ret.append(Function('bool', 'leader', n2))
-	ret.append(Function('bool', 'pending', id0, n2))
-	ret.append(Function('bool', 'pending', id1, n2))
-	ret.append(Function('bool', 'pending', id2, n1))
-	ret.append(Function('bool', 'pending', id2, n0))
-	ret.append(Function('bool', 'pending', id2, n2))
-	ret.append(Function('bool', 'le', id1, id2))
-	ret.append(Function('bool', 'le', id0, id2))
-	ret.append(Function('bool', 'btw', n0, n1, n2))
+	numVarFS['node'] = 3
+	numVarFS['id'] = 3
+	featureset.append(Equality(n0,n2))
+	featureset.append(Equality(n1,n2))
+	featureset.append(Equality(id0,id1))
+	featureset.append(Equality(id0,id2))
+	featureset.append(Equality(id2,id1))
+	featureset.append(Function('bool', 'leader', n2))
+	featureset.append(Function('bool', 'pending', id0, n2))
+	featureset.append(Function('bool', 'pending', id1, n2))
+	featureset.append(Function('bool', 'pending', id2, n1))
+	featureset.append(Function('bool', 'pending', id2, n0))
+	featureset.append(Function('bool', 'pending', id2, n2))
+	featureset.append(Function('bool', 'le', id1, id2))
+	featureset.append(Function('bool', 'le', id0, id2))
+	featureset.append(Function('bool', 'ring.btw', n0, n1, n2))
+	featureset.append(Function('bool', 'ring.btw', n0, n2, n1))
+	featureset.append(Function('bool', 'ring.btw', n1, n0, n2))
+	featureset.append(Function('bool', 'ring.btw', n1, n2, n0))
+	featureset.append(Function('bool', 'ring.btw', n2, n1, n0))
+	featureset.append(Function('bool', 'ring.btw', n2, n0, n1))
 
 
 def predToivyFmla(pred):
@@ -238,7 +255,8 @@ def predToivyFmla(pred):
 
 class Universe:
 	'''
-	Nothing but a dictionary containing values each sort can take in the model
+	Nothing but a dictionary where key = sort name (str)
+	value = list of values (Const obj) each sort can take in the model
 	'''
 	def __init__(self, unv):
 		self.unv = {}
@@ -254,7 +272,13 @@ class Universe:
 		return len(self.unv.get(sort,[]))
 
 	def keys(self):
-		return self.unv.keys()
+		return sorted(self.unv.keys())
+	
+	def unvsize(self):
+		ret = {}
+		for sort in self.keys():
+			ret[sort] = self.sizeof(sort)
+		return ret		
 
 	def __iter__(self):
 		return self.unv
@@ -266,6 +290,9 @@ class Universe:
 		assert sort in self.unv, "sort "+sort+" not in Universe"
 		assert pos<len(self.unv[sort]), "pos={}, sort={}, unv[sort]={}".format(pos,sort,self.unv[sort])
 		return self.unv[sort][pos]
+
+	def __repr__(self):
+		return repr(self.unv)
 
 
 def enum(len,h, suffix):
@@ -284,7 +311,6 @@ class Sample:
 	def __init__(self, model, label):
 		if model is not None:
 			self.unv = Universe(model[0])
-			# print "<plearn>",self.unv.unv
 			# self.validateUnv()
 			self.interp = Interpretation(model[1][0][1].fmlas) # for state 0 get fmla in clause object
 			self.poststateItp = Interpretation(model[1][1][1].fmlas) # interpretaion of state resulted by performing action on state 0 
@@ -306,16 +332,20 @@ class Sample:
 			res = self.solveIvyfmla(fmla.body)
 			assert isinstance(res.sort, logic.BooleanSort), "Not bidy does not returns boolean value"
 			return logic.Const('0' if res.name=='1' else '1', BooleanSort())
-		if isinstance(fmla, logic.Or):
-			solveTerms = [self.solveIvyfmla(t) for t in fmla]
-			assert all([term.sort==BooleanSort() for term in solveTerms]), "Or terms should be boolean"
-			val = '1' if any([term.name=='1' for term in solveTerms]) else '0'
-			return logic.Const(val,BooleanSort())
-		if isinstance(fmla, logic.And):
-			solveTerms = [self.solveIvyfmla(t) for t in fmla]
-			assert all([term.sort==BooleanSort() for term in solveTerms]), "And terms should be boolean"
-			val = '1' if all([term.name=='1' for term in solveTerms]) else '0'
-			return logic.Const(val,BooleanSort())
+		if isinstance(fmla, logic.Or): # short circuit
+			for term in fmla:
+				sterm = self.solveIvyfmla(term)
+				assert sterm.sort==BooleanSort(), "Or terms should be boolean"
+				if sterm.name=='1':
+					return logic.Const('1',BooleanSort())
+			return logic.Const('0',BooleanSort())
+		if isinstance(fmla, logic.And): # short circuit
+			for term in fmla:
+				sterm = self.solveIvyfmla(term)
+				assert sterm.sort==BooleanSort(), "Or terms should be boolean"
+				if sterm.name=='0':
+					return logic.Const('0',BooleanSort())
+			return logic.Const('1',BooleanSort())
 		if isinstance(fmla, logic.Eq):
 			st1, st2 = self.solveIvyfmla(fmla.t1), self.solveIvyfmla(fmla.t2)
 			return logic.Const('1' if st1 == st2 else '0', BooleanSort())
@@ -340,10 +370,14 @@ class Sample:
 			ret = self.unv.get(sort, self.instance[spos][num])
 			# print "<plearn> lookup answer", ret
 			return ret.toivy()
-		if isinstance(fmla, logic.Implies):
-			t1, t2 = self.solveIvyfmla(fmla.t1), self.solveIvyfmla(fmla.t2)
-			assert t1.sort==BooleanSort() and t2.sort==BooleanSort() and t1.name in ['0','1'], "implies term is not of type Boolean"
-			val = '1' if t1.name=='0' or t2.name=='1' else '0'
+		if isinstance(fmla, logic.Implies): # short circuit
+			t1 = self.solveIvyfmla(fmla.t1)
+			assert t1.sort==BooleanSort() and t1.name in ['0','1'], "implies term1 is not of type Boolean" 
+			if t1.name=='0':
+				return logic.Const('1', BooleanSort()) 
+			t2 = self.solveIvyfmla(fmla.t2)
+			assert t2.sort==BooleanSort() and t2.name in  ['0','1'], "implies term2 is not of type Boolean"
+			val = '1' if t2.name=='1' else '0'
 			return logic.Const(val, BooleanSort())
 		assert False, "{} type is not supported".format(type(fmla))
 	
@@ -368,20 +402,21 @@ class Sample:
 			t1, t2 = self.solveFormula(fmla.args[0]), self.solveFormula(fmla.args[1])
 			return Const('bool','1' if t1==t2 else '0')
 
-	def validateUnv(self):
-		global maxUniverse
-		for key in self.unv.keys():
-			assert len(self.unv[key]) <= len(maxUniverse[key]), "sample has bigger univ than maxunv on sort "+key  
+	# def validateUnv(self):
+	# 	global maxUniverse
+	# 	for key in self.unv.keys():
+	# 		assert len(self.unv[key]) <= len(maxUniverse[key]), "sample has bigger univ than maxunv on sort "+key  
 
 
 	def addto(self, sortnum):
-		inst = self.instance[sortnum] # python copies list by reference
+		s_inst = self.instance[sortnum] # python copies list by reference
+		assert isinstance(s_inst, list), "instance's element is not a list"
 		sort = self.sortat[sortnum]
-		for i in range(len(inst)):
-			if inst[i]==self.unv.sizeof(sort)-1:
-				inst[i] = 0  
+		for i in range(len(s_inst)):
+			if s_inst[i]==self.unv.sizeof(sort)-1:
+				s_inst[i] = 0  
 			else:
-				inst[i] += 1
+				s_inst[i] += 1
 				return True
 		return False
 
@@ -434,24 +469,18 @@ class Sample:
 	def initInstance(self):
 		'''
 		self.instance is a list of list of int. where each element of list represent value of all (universally quantified) variables of a sort
-		self.enumeration is a list of list of list (Wow!!). each element of enumeration is list of all instance of a sort
-		self.pos is used for next instance. it denotes for a given sort which instance in enumeration does self.instance points to
 		to make sense of an instance universe is needed
 		'''
-		global maxUniverse
+		global numVarFS
 		self.instance, self.enumeration, self.pos, self.sortpos, self.sortat = [], [], [], {}, []
 		i = 0
 		for sort in self.unv.keys(): # <TODO> check if working.
-			instsize = maxUniverse.sizeof(sort) # size of the instance depends of maxUniverse or feature set to be exact
+			instsize = numVarFS[sort] # size of the instance depends on feature set
 			size = self.unv.sizeof(sort)
 			self.instance.append([0]*instsize)
-			# self.enumeration.append(enum(instsize,size-1,[]))
-			# self.pos.append(0) # initial value = [0]*len(keys)
 			self.sortpos[sort] = i
 			self.sortat.append(sort)
 			i+=1
-		# assert len(self.pos) == self.numsort, "self.pos has incorrect conf"
-		# assert len(self.enumeration) == self.numsort, "self.enumeration has incorrect conf"
 		assert len(self.instance) == self.numsort, "self.instance has incorrect conf"
 		self.hasIterated = False
 
@@ -464,9 +493,7 @@ class Sample:
 
 class Classifier:
 
-	def __init__(self, unv, featureset):
-		self.featureset = featureset # list of object of class Predicate
-		self.maxunv = unv
+	def __init__(self):
 		# self.label = [] # each element is 0('false')- or 1('true')+ or
 		self.samples = []
 		self.posDataPoints = set() # each element is tuple containg values of feature set
@@ -483,6 +510,7 @@ class Classifier:
 		A sample is a model and label. A samplePoint is a model and label with a concrete instance. A sample generally have multiple samplePoint.
 		Each samplePoint is then converted to dataPoint which is abstraction of samplePoint by feature set i.e. value of features.
 		'''
+		global featureset
 		if hasattr(sample, 'unv'):  # sample is not None
 			# universe has already been validated
 			print "<plearn> {} sample will be added".format("+" if sample.label=='1' else "-")
@@ -492,7 +520,7 @@ class Classifier:
 				# print "<plearn> {} samplePoint instance {}".format("+" if sample.label=='1' else "-", samplePoint.instance)
 				if not samplePoint.isValid():
 					continue
-				dataPoint = tuple([samplePoint.solveFormula(fmla).val for fmla in self.featureset])
+				dataPoint = tuple([samplePoint.solveFormula(fmla).val for fmla in featureset])
 				# print "<plearn> dataPoint is ", dataPoint
 				if sample.label=='1':
 					if dataPoint in self.cnflDataPoints or dataPoint in self.posDataPoints:
@@ -517,11 +545,12 @@ class Classifier:
 		bintree = self.clf.tree_
 		# first we will build a formula and then build a Clause
 		def tofmla(node):
+			global featureset
 			"""node is of type int"""
 			if bintree.children_right[node] != bintree.children_left[node]: # not a leaf
 				assert bintree.feature[node] != _tree.TREE_UNDEFINED, "parent node uses undefined feature"
 				assert isinstance(bintree.feature[node], int), "feature returned is not int"
-				feat = self.featureset[bintree.feature[node]] # object of class Predicate
+				feat = featureset[bintree.feature[node]] # object of class Predicate
 				ivyFeat = predToivyFmla(feat)
 				fmlaleft = tofmla(bintree.children_left[node]) # <TODO> assert that left is always false
 				fmlaright = tofmla(bintree.children_right[node])
@@ -550,10 +579,11 @@ class Classifier:
 	: returns : A logic formula  
 	'''
 	def ite(self,dp):
+		global featureset
 		andArgs = []
 		for i in range(len(dp)):
 			featval = dp[i]
-			feat = predToivyFmla(self.featureset[i])
+			feat = predToivyFmla(featureset[i])
 			if featval=='1':
 				andArgs.append(feat)
 			else:
