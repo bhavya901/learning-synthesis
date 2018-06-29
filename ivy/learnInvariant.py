@@ -29,11 +29,10 @@ import display_sample as ds
 # <TODO> action Clause for positive sample is different from Neg sample
 module = None
 featureset = []
-numVarFS = {} # number of Variables of each sort in feature set
+numVarFS = {} # number of Variables(quant.) of each sort in feature set (invariant: equal to max number of quantified Var that could be present in CandInv)
 candInv = true_clauses()
 coincide = false_clauses()
 silent = False # if True then silent the print statement in sat checking backend
-
 '''
 :returns a tuple containing universe and pure state.
 	pure state is again a tuple with 2nd element a clause repr that state
@@ -127,8 +126,8 @@ def learnInv(mod):
 			silent = False
 			checkInitialCond(mod)
 			break
+		# constrFeatSetLE3(mod)
 		# testfunc(mod)
-		constrFeatSetLE3(mod)
 		for actname in sorted(mod.public_actions):
 			print "learning Invariant for action {}".format(actname)
 			clf = Classifier()
@@ -153,12 +152,35 @@ def checkInitialCond(mod):
 
 
 def testfunc(mod):
-	print "<plearn> testing"
-	sneg = sampleNeg(mod, true_clauses())
-	sneg = Sample(sneg, '0')
-	if hasattr(sneg, 'interp'):
-		sneg.displaySample()
+	
+	ns = logic.UninterpretedSort("node")
+	ids = logic.UninterpretedSort('id')
+	n1 = logic.Var('Node0', ns)
+	n2 = logic.Var('Node1', ns)
+	ineq = logic.Not(logic.Eq(n2,n1))
+	leadsorts = [ns, logic.BooleanSort()]
+	leadfunc = logic.Const("leader",logic.FunctionSort(*leadsorts))
+	idsorts = [ns, logic.UninterpretedSort("id")]
+	idfunc = logic.Const("idn", logic.FunctionSort(*idsorts))
+	lesorts = [ids, ids, logic.BooleanSort()]
+	lefunc = logic.Const('le', logic.FunctionSort(*lesorts))
+	leadterm = logic.Apply(leadfunc, *[n1])
+	leterm = logic.Apply(lefunc,*[logic.Apply(idfunc, *[n1]), logic.Apply(idfunc, *[n2])])
+	fmla = logic.Not(logic.And(*[ineq, leadterm, leterm]))
+	candInv, coincide = Clauses([fmla]), false_clauses()
+	print "<plearn> CandInv", candInv
+	for actname in sorted(mod.public_actions):
+		spos, sneg = samplePos(mod,candInv,coincide, actname), sampleNeg(mod,candInv, actname)
+		spos, sneg = Sample(spos,'1'), Sample(sneg,'0')
+		if hasattr(spos, 'interp'):
+			print "<plearn> + interp: ",spos.interp
+			spos.displaySample()
+		if hasattr(sneg, 'interp'):
+			print "<plearn> - interp: ",sneg.interp
+			sneg.displaySample()
 	exit(0)
+
+
 
 def modifyfcs(mod):
 	''' fcs = final conditions
@@ -168,6 +190,21 @@ def modifyfcs(mod):
 		quant_vars = lut.used_variables_clauses(lc.formula)
 		print "var in conjs", quant_vars
 		# <TODO> replace vars such that corresponding quantified vars can be identified
+
+def constrFeatSet(newNumVarFS):
+	global module, numVarFS
+	numVarFS = newNumVarFS
+	if numVarFS['node'] != numVarFS['id']:
+		assert False, "thats odd"
+	if numVarFS['node']>=1:
+		constrFeatSetLE1()
+	if numVarFS['node']>=2:
+		constrFeatSetLE2()
+	if numVarFS['node']>=3:
+		constrFeatSetLE3()
+	if numVarFS['node']>=4:
+		assert False, "numVarFS = {}".format(numVarFS) 	
+
 
 def constrFeatSetCS(mod):
 	global numVarFS, featureset
@@ -180,23 +217,23 @@ def constrFeatSetCS(mod):
 	featureset.append(Function('bool', 'link', c1, s0))
 	featureset.append(Function('bool', 'semaphore', s0))
 
-def constrFeatSetLE1(mod):
+def constrFeatSetLE1():
 	global numVarFS, featureset
 	n0 = Var('node', 'Node0', 0)
 	id0 = Function('id', 'idn', n0)
-	numVarFS['node'] = 1
-	numVarFS['id'] = 1
+	# numVarFS['node'] = 1
+	# numVarFS['id'] = 1
 	featureset.append(Function('bool', 'leader', n0))
 
-def constrFeatSetLE2(mod):
+def constrFeatSetLE2():
 	global numVarFS, featureset
 	n0,n1 = Var('node', 'Node0', 0), Var('node','Node1', 1)
 	id0, id1 = Function('id', 'idn', n0), Function('id', 'idn', n1) 
-	numVarFS['node'] = 2
-	numVarFS['id'] = 2
+	# numVarFS['node'] = 2
+	# numVarFS['id'] = 2
 	featureset.append(Equality(n0,n1))
 	featureset.append(Equality(id0,id1))
-	featureset.append(Function('bool', 'leader', n0))
+	# featureset.append(Function('bool', 'leader', n0))
 	featureset.append(Function('bool', 'leader', n1))
 	featureset.append(Function('bool', 'pending', id0, n0))
 	featureset.append(Function('bool', 'pending', id1, n1))
@@ -205,13 +242,14 @@ def constrFeatSetLE2(mod):
 	featureset.append(Function('bool', 'le', id0, id1))
 	featureset.append(Function('bool', 'le', id1, id0))
 
-def constrFeatSetLE3(mod):
+def constrFeatSetLE3():
+	global numVarFS, featureset
 	n0,n1 = Var('node', 'Node0', 0), Var('node','Node1', 1)
 	id0, id1 = Function('id', 'idn', n0), Function('id', 'idn', n1)
 	n2 = Var('node', 'Node2', 2)
 	id2 = Function('id', 'idn', n2)
-	numVarFS['node'] = 3
-	numVarFS['id'] = 3
+	# numVarFS['node'] = 3
+	# numVarFS['id'] = 3
 	featureset.append(Equality(n0,n2))
 	featureset.append(Equality(n1,n2))
 	featureset.append(Equality(id0,id1))
@@ -278,7 +316,7 @@ class Universe:
 		ret = {}
 		for sort in self.keys():
 			ret[sort] = self.sizeof(sort)
-		return ret		
+		return ret
 
 	def __iter__(self):
 		return self.unv
@@ -306,7 +344,6 @@ def enum(len,h, suffix):
 class Sample:
 	''' a Sample refers to the model returned by z3.From a model many samplePoint can be extracted	by iterating through instance variable
 	instance variable refers to the value of each universally quantified variable (for eg n1, n2)
-	currently doesn't support change in universe.
 	'''
 	def __init__(self, model, label):
 		if model is not None:
@@ -475,11 +512,10 @@ class Sample:
 		self.instance, self.enumeration, self.pos, self.sortpos, self.sortat = [], [], [], {}, []
 		i = 0
 		for sort in self.unv.keys(): # <TODO> check if working.
-			instsize = numVarFS[sort] # size of the instance depends on feature set
-			size = self.unv.sizeof(sort)
+			instsize = numVarFS.get(sort,0) # size of the instance depends on feature set
 			self.instance.append([0]*instsize)
-			self.sortpos[sort] = i
-			self.sortat.append(sort)
+			self.sortpos[sort] = i # constant
+			self.sortat.append(sort) # constant
 			i+=1
 		assert len(self.instance) == self.numsort, "self.instance has incorrect conf"
 		self.hasIterated = False
@@ -490,12 +526,16 @@ class Sample:
 		state1 = ds.getGraph(self.unv, self.poststateItp)
 		ds.displayStates(self.label, state0, state1)
 
+	def setInstance(self, inst):
+		self.instance = inst
+
 
 class Classifier:
 
 	def __init__(self):
 		# self.label = [] # each element is 0('false')- or 1('true')+ or
-		self.samples = []
+		self.posSamples = []
+		self.negSamples = []
 		self.posDataPoints = set() # each element is tuple containg values of feature set
 		self.negDataPoints = set()
 		self.cnflDataPoints = set() # samples which cannot be seperated by feature set
@@ -507,19 +547,20 @@ class Classifier:
 
 	def addSample(self,sample):
 		'''
-		A sample is a model and label. A samplePoint is a model and label with a concrete instance. A sample generally have multiple samplePoint.
+		A sample is a model and label. A samplePoint is a model and label(= Sample) with a concrete instance. A sample generally have multiple samplePoint.
 		Each samplePoint is then converted to dataPoint which is abstraction of samplePoint by feature set i.e. value of features.
 		'''
 		global featureset
 		if hasattr(sample, 'unv'):  # sample is not None
 			# universe has already been validated
 			print "<plearn> {} sample will be added".format("+" if sample.label=='1' else "-")
-			self.samples.append(sample)
+			self.updateFeatSet(sample) # checks and update if feature set update is needed
 			newPoints = []
+			self.posSamples.append(sample) if sample.label=='1' else self.negSamples.append(sample)
 			for samplePoint in sample:
 				# print "<plearn> {} samplePoint instance {}".format("+" if sample.label=='1' else "-", samplePoint.instance)
 				if not samplePoint.isValid():
-					continue
+					continue				
 				dataPoint = tuple([samplePoint.solveFormula(fmla).val for fmla in featureset])
 				# print "<plearn> dataPoint is ", dataPoint
 				if sample.label=='1':
@@ -538,10 +579,12 @@ class Classifier:
 						self.cnflDataPoints.add(dataPoint)
 					self.negDataPoints.add(dataPoint)
 					newPoints.append(dataPoint)
-			print "New {} sample points added = {}".format("+" if sample.label=='1' else "-", newPoints)			
+			print "New {} sample points added = {}".format("+" if sample.label=='1' else "-", newPoints)
 
 
 	def toClauses(self):
+		''' converts decision tree to Clause. 
+		'''
 		bintree = self.clf.tree_
 		# first we will build a formula and then build a Clause
 		def tofmla(node):
@@ -575,7 +618,41 @@ class Classifier:
 		return Clauses([seprfmla])
 
 
+	def updateFeatSet(self, sample):
+		global numVarFS
+		# if positive sample or sample universe less than quantified Var in featSet for all sort then do nothing
+		if sample.label=='1' or all(sample.unv.sizeof(sort) <= numVarFS.get(sort,0) for sort in sample.unv.keys()):
+			return
+		newNumVarFS = {} 
+		for sort in sample.unv.keys():
+			newNumVarFS[sort] = max(sample.unv.sizeof(sort), numVarFS.get(sort, 0))
+		print "<plearn> updating featureSet vars to", newNumVarFS
+		constrFeatSet(newNumVarFS) # also changes numVarFS
+		global featureset
+		print "<plearn> featureset is ", featureset
+		self.posDataPoints, self.negDataPoints, self.cnflDataPoints = set(), set(), set() # empty out previous dataPoints
+		for smpl in self.negSamples:
+			smpl.initInstance()
+			for samplePoint in smpl:
+				if not samplePoint.isValid():
+					continue
+				dataPoint = tuple([samplePoint.solveFormula(fmla).val for fmla in featureset])
+				self.negDataPoints.add(dataPoint)
+		for smpl in self.posSamples:
+			smpl.initInstance()	
+			for samplePoint in smpl:
+				dataPoint = tuple([samplePoint.solveFormula(fmla).val for fmla in featureset])
+				if dataPoint in self.cnflDataPoints or dataPoint in self.posDataPoints:
+					continue
+				if dataPoint in self.negDataPoints:
+					# print "<plearn> confl samplePoint:", samplePoint.interp
+					self.cnflDataPoints.add(dataPoint)
+					continue
+				self.posDataPoints.add(dataPoint)
+		print "<plearn> update completed"
+
 	'''
+	: param dp : dataPoint
 	: returns : A logic formula  
 	'''
 	def ite(self,dp):
