@@ -126,7 +126,6 @@ def learnInv(mod):
 			silent = False
 			checkInitialCond(mod)
 			break
-		# constrFeatSetLE3(mod)
 		# testfunc(mod)
 		for actname in sorted(mod.public_actions):
 			print "learning Invariant for action {}".format(actname)
@@ -333,14 +332,6 @@ class Universe:
 		return repr(self.unv)
 
 
-def enum(len,h, suffix):
-	if len==1:
-		return [[i]+suffix for i in range(h+1)]
-	if h==0:
-		return [[0]*len + suffix]
-	return enum(len,h-1,suffix)+enum(len-1,h,[h]+suffix)
-
-
 class Sample:
 	''' a Sample refers to the model returned by z3.From a model many samplePoint can be extracted	by iterating through instance variable
 	instance variable refers to the value of each universally quantified variable (for eg n1, n2)
@@ -404,6 +395,7 @@ class Sample:
 			assert name[2:len(sort)+2].lower()==sort.lower(), "Const ({},{}) not in desired format".format(fmla.name,fmla.sort.name)
 			num = int(name[len(sort)+2:])
 			spos = self.sortpos[sort]
+			# print "debug: instance = {}, spos={}, num={}".format(self.instance,spos,num)
 			ret = self.unv.get(sort, self.instance[spos][num])
 			# print "<plearn> lookup answer", ret
 			return ret.toivy()
@@ -593,6 +585,8 @@ class Classifier:
 			if bintree.children_right[node] != bintree.children_left[node]: # not a leaf
 				assert bintree.feature[node] != _tree.TREE_UNDEFINED, "parent node uses undefined feature"
 				assert isinstance(bintree.feature[node], int), "feature returned is not int"
+				threshold = bintree.threshold[node]
+				assert not (threshold == 0 or threshold==1), "threshold=({}, {}) adds no information".format(type(threshold), threshold) 
 				feat = featureset[bintree.feature[node]] # object of class Predicate
 				ivyFeat = predToivyFmla(feat)
 				fmlaleft = tofmla(bintree.children_left[node]) # <TODO> assert that left is always false
@@ -630,6 +624,7 @@ class Classifier:
 		constrFeatSet(newNumVarFS) # also changes numVarFS
 		global featureset
 		print "<plearn> featureset is ", featureset
+		sample.initInstance()
 		self.posDataPoints, self.negDataPoints, self.cnflDataPoints = set(), set(), set() # empty out previous dataPoints
 		for smpl in self.negSamples:
 			smpl.initInstance()
@@ -672,7 +667,7 @@ class Classifier:
 		orArgs = [self.ite(dataPoint) for dataPoint in self.cnflDataPoints]
 		fmla = logic.Or(*orArgs)
 		return Clauses([fmla])
-			
+
 
 class Interpretation:
 	"""Contains the values for each relation, function and constant in the model stored as dict"""
@@ -850,6 +845,8 @@ def simplifyAnd(f1, f2):
 		return logic.Or()
 	if f2==logic.And():
 		return f1
+	if f1==logic.And():
+		return f2
 	return logic.And(f1,f2)
 
 def simplifyOr(f1, f2):
@@ -857,4 +854,6 @@ def simplifyOr(f1, f2):
 		return logic.And()
 	if f2==logic.Or():
 		return f1
+	if f1==logic.Or():
+		return f2
 	return logic.Or(f1,f2)
