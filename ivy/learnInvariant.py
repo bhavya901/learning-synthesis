@@ -30,9 +30,11 @@ import display_sample as ds
 module = None
 featureset = []
 numVarFS = {} # number of Variables(quant.) of each sort in feature set (invariant: equal to max number of quantified Var that could be present in CandInv)
+numVarInv = {} # number of variables of each sort in learned as well as previous invariant. Used for determining instance size
 candInv = true_clauses()
 coincide = false_clauses()
 silent = False # if True then silent the print statement in sat checking backend
+
 '''
 :returns a tuple containing universe and pure state.
 	pure state is again a tuple with 2nd element a clause repr that state
@@ -84,18 +86,20 @@ def learnWeekestInv(mod, clf, actname):
 	global candInv, coincide
 	candInv, coincide =  true_clauses(), false_clauses()
 	while True:
-		spos, sneg = samplePos(mod,candInv,coincide, actname), sampleNeg(mod,candInv, actname)
+		spos = samplePos(mod,candInv,coincide, actname) # Generating positve sample
+		sneg = sampleNeg(mod,candInv, actname)
 		if spos is None and sneg is None:
 			break
-		spos, sneg = Sample(spos,'1'), Sample(sneg,'0')
+		spos, sneg = Sample(spos,'1'), Sample(sneg,'0') 
 		print "Pos Sample", spos.unv.unvsize() if hasattr(spos, 'interp') else None
 		print "Neg Sample", sneg.unv.unvsize() if hasattr(sneg, 'interp') else None
-		# if hasattr(spos, 'interp') and len(spos.unv.unv['node'])!=len(spos.unv.unv['id']):
-		# 	print "<plearn> interp: ",spos.interp
-		# 	spos.displaySample()
-		# if hasattr(sneg, 'interp'):
-		# 	sneg.displaySample()	
-		clf.addSample(spos)
+		# if hasattr(spos, 'interp'): # spos is not null
+			# print "<plearn> + sample interpretation : ",spos.interp, "\n" # for detailed information
+			# spos.displaySample()
+		# if hasattr(sneg, 'interp'): # sneg is not null
+			# print "<plearn> - sample interpretation : ",sneg.interp, "\n" # for detailed information
+			# sneg.displaySample()
+		clf.addSample(spos) # adding Positive sample
 		clf.addSample(sneg)
 		print "<plearn> done adding samples"
 		import sys
@@ -116,7 +120,7 @@ def learnInv(mod):
 	print "<plearn> Directed to learning Algorithm"
 	global silent, module
 	silent = True
-	modifyfcs(mod)
+	updatenvi(mod)
 	module = mod
 	while True:
 		print "Checking Inductiveness of the Invariant"
@@ -138,6 +142,7 @@ def learnInv(mod):
 			if newInv != true_clauses():
 				lf = ivy_ast.LabeledFormula(*[ivy_ast.Atom('learnedInv'+actname), logic.And(*newInv.fmlas)])
 				mod.labeled_conjs.append(lf)  # modifying mod and module, obj are copied by refr.
+				updatenvi(mod)
 
 def checkInitialCond(mod):
     print "\nChecking if Initialization establishes the learned invariants"
@@ -181,14 +186,26 @@ def testfunc(mod):
 
 
 
-def modifyfcs(mod):
-	''' fcs = final conditions
+def updatenvi(mod):
+	''' nvi = NumVarInv
 	'''
 	lcs = mod.labeled_conjs
-	for lc in lcs:	
-		quant_vars = lut.used_variables_clauses(lc.formula)
-		print "var in conjs", quant_vars
+	varsof = {}
+	for lc in lcs:
+		quant_vars = lut.used_variables_clauses(lc.formula) # list
+		# print "var in conjs", quant_vars
 		# <TODO> replace vars such that corresponding quantified vars can be identified
+		for var in quant_vars:
+			sort = var.sort.name
+			name = var.name
+			if sort not in varsof.keys():
+				varsof[sort] = set([name])
+			else:
+				varsof[sort].add(name)
+	global numVarInv
+	for sort in varsof.keys():
+		numVarInv[sort] = len(varsof[sort])
+
 
 def constrFeatSet(newNumVarFS):
 	global module, numVarFS
@@ -340,7 +357,7 @@ class Sample:
 		if model is not None:
 			self.unv = Universe(model[0])
 			# self.validateUnv()
-			self.interp = Interpretation(model[1][0][1].fmlas) # for state 0 get fmla in clause object
+			self.interp = Interpretation(model[1][0][1].fmlas) # for state 0 get fmla in clause object (pre state interpretation)
 			self.poststateItp = Interpretation(model[1][1][1].fmlas) # interpretaion of state resulted by performing action on state 0 
 			self.label = label
 			self.numsort = len(self.unv.keys())
@@ -471,7 +488,7 @@ class Sample:
 		global module, candInv, coincide
 		if self.label == '0':
 			fcs = [icheck.ConjChecker(c) for c in module.labeled_conjs]  # inverts the fmla
-			fmlas = [fc.cond().fmlas for fc in fcs] # fc.cond().fmlas gives a list of ivy predicate logic. 
+			fmlas = [fc.cond().fmlas for fc in fcs] # fc.cond().fmlas gives a list of ivy predicate logic.
 		else:
 			return True # It will cause repeatation of some positive samples, but it will not change the correctness of algorithm 
 			negateci, negateCoincide = negate_clauses(candInv), negate_clauses(coincide)
@@ -499,12 +516,13 @@ class Sample:
 		'''
 		self.instance is a list of list of int. where each element of list represent value of all (universally quantified) variables of a sort
 		to make sense of an instance universe is needed
+		for eg self.instance['node'][1] = 0 then value of Node1 is self.unv.get('node','0') which would usually be node:Const(0)
 		'''
-		global numVarFS
+		global numVarFS, numVarInv
 		self.instance, self.enumeration, self.pos, self.sortpos, self.sortat = [], [], [], {}, []
 		i = 0
 		for sort in self.unv.keys(): # <TODO> check if working.
-			instsize = numVarFS.get(sort,0) # size of the instance depends on feature set
+			instsize = max(numVarFS.get(sort,0), numVarInv.get(sort,0)) # size of the instance depends on feature set and Previous Invariant size (for validation)
 			self.instance.append([0]*instsize)
 			self.sortpos[sort] = i # constant
 			self.sortat.append(sort) # constant
@@ -539,12 +557,13 @@ class Classifier:
 
 	def addSample(self,sample):
 		'''
-		A sample is a model and label. A samplePoint is a model and label(= Sample) with a concrete instance. A sample generally have multiple samplePoint.
+		A sample is a model and label (object of class Sample). A samplePoint is a model and label(= Sample) with a concrete instance (sample.instance denoting some meaningful value)(object of class Sample).
+		A sample generally have multiple samplePoint. difference between two samplePoint belonging to same sample is only instance i.e. values of quantified variable.
+		As samplePoint has value of each quantified variable we can get value of each predicates in feature set to get dataPoint. 
 		Each samplePoint is then converted to dataPoint which is abstraction of samplePoint by feature set i.e. value of features.
 		'''
 		global featureset
 		if hasattr(sample, 'unv'):  # sample is not None
-			# universe has already been validated
 			print "<plearn> {} sample will be added".format("+" if sample.label=='1' else "-")
 			self.updateFeatSet(sample) # checks and update if feature set update is needed
 			newPoints = []
@@ -552,7 +571,7 @@ class Classifier:
 			for samplePoint in sample:
 				# print "<plearn> {} samplePoint instance {}".format("+" if sample.label=='1' else "-", samplePoint.instance)
 				if not samplePoint.isValid():
-					continue				
+					continue
 				dataPoint = tuple([samplePoint.solveFormula(fmla).val for fmla in featureset])
 				# print "<plearn> dataPoint is ", dataPoint
 				if sample.label=='1':
@@ -589,7 +608,7 @@ class Classifier:
 				assert not (threshold == 0 or threshold==1), "threshold=({}, {}) adds no information".format(type(threshold), threshold) 
 				feat = featureset[bintree.feature[node]] # object of class Predicate
 				ivyFeat = predToivyFmla(feat)
-				fmlaleft = tofmla(bintree.children_left[node]) # <TODO> assert that left is always false
+				fmlaleft = tofmla(bintree.children_left[node]) # leaft branch means case when ivyFeat is false
 				fmlaright = tofmla(bintree.children_right[node])
 				if fmlaright==logic.And():
 					return simplifyOr(ivyFeat, fmlaleft)

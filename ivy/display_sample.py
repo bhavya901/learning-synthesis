@@ -21,7 +21,7 @@ def getGraph(unv, interp):
 
 	unary_relOrder = {}
 	bin_relOrder = {}
-	for key, value in interp.valof.iteritems(): # adding edges and colouring nodes
+	for key, value in sorted(interp.valof.iteritems(), key=lambda (k,v): k.name): # adding edges and colouring nodes
 		if isinstance(key, li.Function):
 			arity = key.arity() if key.sort=='bool' else key.arity()+1
 			if arity>=3:
