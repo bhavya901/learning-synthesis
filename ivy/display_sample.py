@@ -59,13 +59,12 @@ def getGraph(unv, interp):
 		cnum = int(g.nodes[node]['cnum']*8)
 		assert cnum==g.nodes[node]['cnum']*8, ""
 		g.nodes[node]['color'] = node_color[cnum]
-
 	return g
 
 
 def displayStates(slabel, graph0, graph1=None):
 	fig, ax = plot.subplots(nrows=1, ncols=2,figsize=(10, 5))
-	fig.suptitle('{} sample'.format('Positve' if slabel=='1' else 'Negative'))
+	fig.suptitle('{} sample'.format('Positve' if slabel=='1' else 'Negative' if slabel=='0' else 'CounterExample to initialization Check'))
 	if graph1!=None:
 		plot.subplot(121)
 	else:

@@ -93,9 +93,9 @@ def learnWeekestInv(mod, clf, actname):
 		spos, sneg = Sample(spos,'1'), Sample(sneg,'0') 
 		print "Pos Sample", spos.unv.unvsize() if hasattr(spos, 'interp') else None
 		print "Neg Sample", sneg.unv.unvsize() if hasattr(sneg, 'interp') else None
-		if hasattr(spos, 'interp'): # spos is not None
-			print "<plearn> + sample interpretation : ",spos.interp, "\n" # for detailed information
-			spos.displaySample() # for displaying the sample
+		# if hasattr(spos, 'interp'): # spos is not None
+		# 	print "<plearn> + sample interpretation : ",spos.interp, "\n" # for detailed information
+		# 	spos.displaySample() # for displaying the sample
 		# if hasattr(sneg, 'interp'): # sneg is not None
 			# print "<plearn> - sample interpretation : ",sneg.interp, "\n" # for detailed information
 			# sneg.displaySample()
@@ -145,14 +145,26 @@ def learnInv(mod):
 				updatenvi(mod)
 
 def checkInitialCond(mod):
-    print "\nChecking if Initialization establishes the learned invariants"
-    print "\n    Invariants are: "
-    for lc in mod.labeled_conjs:
-    	print "    {}".format(Clauses([lc.formula]))
-    print ''
-    with itp.EvalContext(check=False):
-        ag = ivy_art.AnalysisGraph(initializer=lambda x:None)
-        icheck.check_conjs_in_state(mod,ag,ag.states[0])
+	print "\nChecking if Initialization establishes the learned invariants"
+	print "\n    Invariants are: "
+	for lc in mod.labeled_conjs:
+		print "    {}".format(Clauses([lc.formula]))
+	print ''
+	with itp.EvalContext(check=False):
+		ag = ivy_art.AnalysisGraph(initializer=lambda x:None)
+		lcs = mod.labeled_conjs
+		fcs = [icheck.ConjChecker(c) for c in lcs]
+		history = ag.get_history(ag.states[0])
+		gmc = lambda cls, final_cond: itr.small_model_clauses(cls,final_cond,shrink=True)
+		axioms = mod.background_theory()
+		model = history.satisfy(axioms,gmc,fcs)
+		smpl = Sample(model, '-1') # this sample has no post state
+		if hasattr(smpl, 'interp'): # smpl is not None
+			print "<plearn> + sample interpretation : ",smpl.interp, "\n" # for detailed information
+			smpl.displaySample() # for displaying the sample
+			print "\nInitialization establishes the learned Invariant: FAIL"
+		else:
+			print "\nInitialization establishes the learned Invariant: PASS"
 
 
 def testfunc(mod):
@@ -209,83 +221,40 @@ def updatenvi(mod):
 
 
 def constrFeatSet(newNumVarFS):
+	if newNumVarFS.get('node',0)!=0:
+		constrFeatSetLE(newNumVarFS)
+	else:
+		constrFeatSetCS(newNumVarFS)
+
+def constrFeatSetLE(newNumVarFS):
+	''' for leader election program
+	'''
 	global module, numVarFS
-	numVarFS = newNumVarFS
-	if numVarFS['node'] != numVarFS['id']:
-		assert False, "thats odd"
-	if numVarFS['node']>=1:
+	if newNumVarFS['node'] != newNumVarFS['id']:
+		assert False, "thats odd" # comment this if stmt if you expect this behaviour
+	if newNumVarFS['node']>=1 and numVarFS.get('node',0)<1:
 		constrFeatSetLE1()
-	if numVarFS['node']>=2:
+	if newNumVarFS['node']>=2 and numVarFS['node']<2:
 		constrFeatSetLE2()
-	if numVarFS['node']>=3:
+	if newNumVarFS['node']>=3 and numVarFS['node']<3:
 		constrFeatSetLE3()
-	if numVarFS['node']>=4:
-		assert False, "numVarFS = {}".format(numVarFS) 	
+	if newNumVarFS['node']>=4:
+		assert False, "numVarFS = {}".format(numVarFS) 	# leader election having counterexample of 4 or more nodes
 
-
-def constrFeatSetCS(mod):
-	global numVarFS, featureset
-	c0, c1 = Var('client', 'Client0', 0), Var('client', 'Client1', 1) 
-	s0 = Var('server', 'Server0', 0)
-	numVarFS['client'] = 2
-	numVarFS['server'] = 1
-	featureset.append(Equality(c0,c1))
-	featureset.append(Function('bool', 'link', c0, s0))
-	featureset.append(Function('bool', 'link', c1, s0))
-	featureset.append(Function('bool', 'semaphore', s0))
-
-def constrFeatSetLE1():
-	global numVarFS, featureset
-	n0 = Var('node', 'Node0', 0)
-	id0 = Function('id', 'idn', n0)
-	# numVarFS['node'] = 1
-	# numVarFS['id'] = 1
-	featureset.append(Function('bool', 'leader', n0))
-
-def constrFeatSetLE2():
-	global numVarFS, featureset
-	n0,n1 = Var('node', 'Node0', 0), Var('node','Node1', 1)
-	id0, id1 = Function('id', 'idn', n0), Function('id', 'idn', n1) 
-	# numVarFS['node'] = 2
-	# numVarFS['id'] = 2
-	featureset.append(Equality(n0,n1))
-	featureset.append(Equality(id0,id1))
-	# featureset.append(Function('bool', 'leader', n0))
-	featureset.append(Function('bool', 'leader', n1))
-	featureset.append(Function('bool', 'pending', id0, n0))
-	featureset.append(Function('bool', 'pending', id1, n1))
-	featureset.append(Function('bool', 'pending', id0, n1))
-	featureset.append(Function('bool', 'pending', id1, n0))
-	featureset.append(Function('bool', 'le', id0, id1))
-	featureset.append(Function('bool', 'le', id1, id0))
-
-def constrFeatSetLE3():
-	global numVarFS, featureset
-	n0,n1 = Var('node', 'Node0', 0), Var('node','Node1', 1)
-	id0, id1 = Function('id', 'idn', n0), Function('id', 'idn', n1)
-	n2 = Var('node', 'Node2', 2)
-	id2 = Function('id', 'idn', n2)
-	# numVarFS['node'] = 3
-	# numVarFS['id'] = 3
-	featureset.append(Equality(n0,n2))
-	featureset.append(Equality(n1,n2))
-	featureset.append(Equality(id0,id1))
-	featureset.append(Equality(id0,id2))
-	featureset.append(Equality(id2,id1))
-	featureset.append(Function('bool', 'leader', n2))
-	featureset.append(Function('bool', 'pending', id0, n2))
-	featureset.append(Function('bool', 'pending', id1, n2))
-	featureset.append(Function('bool', 'pending', id2, n1))
-	featureset.append(Function('bool', 'pending', id2, n0))
-	featureset.append(Function('bool', 'pending', id2, n2))
-	featureset.append(Function('bool', 'le', id1, id2))
-	featureset.append(Function('bool', 'le', id0, id2))
-	featureset.append(Function('bool', 'ring.btw', n0, n1, n2))
-	featureset.append(Function('bool', 'ring.btw', n0, n2, n1))
-	featureset.append(Function('bool', 'ring.btw', n1, n0, n2))
-	featureset.append(Function('bool', 'ring.btw', n1, n2, n0))
-	featureset.append(Function('bool', 'ring.btw', n2, n1, n0))
-	featureset.append(Function('bool', 'ring.btw', n2, n0, n1))
+def constrFeatSetCS(newNumVarFS):
+	''' for client server program
+	'''
+	global module, numVarFS
+	if newNumVarFS['client']>=1 and numVarFS.get('client',0)<1:
+		constrFeatSetCS11()
+	if newNumVarFS['client']>=2 and numVarFS['client']<2:
+		constrFeatSetCS21()
+	if newNumVarFS['server']>=2 and numVarFS['server']<2:
+		constrFeatSetCS12()
+	if newNumVarFS['server']>=2 and newNumVarFS['client']>=2:
+		constrFeatSetCS22()
+	if newNumVarFS['server']>2 or newNumVarFS['client']>2:
+		assert False,  "numVarFS = {}".format(numVarFS) 	# client server having counterexample of nodes than necessary
 
 
 def predToivyFmla(pred):
@@ -361,7 +330,8 @@ class Sample:
 			self.unv = Universe(model[0])
 			# self.validateUnv()
 			self.interp = Interpretation(model[1][0][1].fmlas) # for state 0 get fmla in clause object (pre state interpretation)
-			self.poststateItp = Interpretation(model[1][1][1].fmlas) # interpretaion of state resulted by performing action on state 0 
+			if label!='-1': # not the counter example generated from failed initialization check  
+				self.poststateItp = Interpretation(model[1][1][1].fmlas) # interpretaion of state resulted by performing action on state 0 
 			self.label = label
 			self.numsort = len(self.unv.keys())
 			self.initInstance()
@@ -536,7 +506,7 @@ class Sample:
 
 	def displaySample(self):
 		state0 = ds.getGraph(self.unv, self.interp)
-		state1 = ds.getGraph(self.unv, self.poststateItp)
+		state1 = ds.getGraph(self.unv, self.poststateItp) if self.label!='-1' else None
 		ds.displayStates(self.label, state0, state1)
 
 	def setInstance(self, inst):
@@ -650,15 +620,15 @@ class Classifier:
 		sample.initInstance()
 		self.posDataPoints, self.negDataPoints, self.cnflDataPoints = set(), set(), set() # empty out previous dataPoints
 		for smpl in self.negSamples:
-			smpl.initInstance()
-			for samplePoint in smpl:
+			smpl.initInstance() # this initiates the new instance according to updated feature set, (changes instance size acc. to newNumVarFS)
+			for samplePoint in smpl: # enumerating through all samplePoints according to updated instance
 				if not samplePoint.isValid():
 					continue
 				dataPoint = tuple([samplePoint.solveFormula(fmla).val for fmla in featureset])
 				self.negDataPoints.add(dataPoint)
 		for smpl in self.posSamples:
-			smpl.initInstance()	
-			for samplePoint in smpl:
+			smpl.initInstance()	# same here
+			for samplePoint in smpl: # same enumeration
 				dataPoint = tuple([samplePoint.solveFormula(fmla).val for fmla in featureset])
 				if dataPoint in self.cnflDataPoints or dataPoint in self.posDataPoints:
 					continue
@@ -890,3 +860,94 @@ def simplifyOr(f1, f2):
 	if f1==logic.Or():
 		return f2
 	return logic.Or(f1,f2)
+
+
+
+def constrFeatSetCS11():
+	global numVarFS, featureset
+	c0 = Var('client', 'Client0', 0)
+	s0 = Var('server', 'Server0', 0)
+	numVarFS['client'] = 1
+	numVarFS['server'] = 1
+	featureset.append(Function('bool', 'link', c0, s0))
+	featureset.append(Function('bool', 'semaphore', s0))
+
+def constrFeatSetCS21():
+	''' upgrade number of clients to 2, with 1 server
+	'''
+	global numVarFS, featureset
+	c0, c1 = Var('client', 'Client0', 0), Var('client', 'Client1', 1) 
+	s0 = Var('server', 'Server0', 0)
+	numVarFS['client'] = 2
+	numVarFS['server'] = 1
+	featureset.append(Equality(c0,c1))
+	featureset.append(Function('bool', 'link', c1, s0))
+
+def constrFeatSetCS12():
+	global numVarFS, featureset
+	c0 = Var('client', 'Client0', 0) 
+	s0, s1 = Var('server', 'Server0', 0), Var('server', 'Server1', 1)
+	numVarFS['client'] = 1
+	numVarFS['server'] = 2
+	featureset.append(Equality(s0,s1))
+	featureset.append(Function('bool', 'link', c0, s1))
+	featureset.append(Function('bool', 'semaphore', s1))
+
+def constrFeatSetCS22():
+	global numVarFS, featureset
+	c0, c1 = Var('client', 'Client0', 0), Var('client', 'Client1', 1) 
+	s0, s1 = Var('server', 'Server0', 0), Var('server', 'Server1', 1)
+	numVarFS['client'] = 2
+	numVarFS['server'] = 2
+	featureset.append(Function('bool', 'link', c1, s1))
+
+def constrFeatSetLE1():
+	global numVarFS, featureset
+	n0 = Var('node', 'Node0', 0)
+	id0 = Function('id', 'idn', n0)
+	numVarFS['node'] = 1
+	numVarFS['id'] = 1
+	featureset.append(Function('bool', 'leader', n0))
+
+def constrFeatSetLE2():
+	global numVarFS, featureset
+	n0,n1 = Var('node', 'Node0', 0), Var('node','Node1', 1)
+	id0, id1 = Function('id', 'idn', n0), Function('id', 'idn', n1) 
+	numVarFS['node'] = 2
+	numVarFS['id'] = 2
+	featureset.append(Equality(n0,n1))
+	featureset.append(Equality(id0,id1))
+	featureset.append(Function('bool', 'leader', n1))
+	featureset.append(Function('bool', 'pending', id0, n0))
+	featureset.append(Function('bool', 'pending', id1, n1))
+	featureset.append(Function('bool', 'pending', id0, n1))
+	featureset.append(Function('bool', 'pending', id1, n0))
+	featureset.append(Function('bool', 'le', id0, id1))
+	featureset.append(Function('bool', 'le', id1, id0))
+
+def constrFeatSetLE3():
+	global numVarFS, featureset
+	n0,n1 = Var('node', 'Node0', 0), Var('node','Node1', 1)
+	id0, id1 = Function('id', 'idn', n0), Function('id', 'idn', n1)
+	n2 = Var('node', 'Node2', 2)
+	id2 = Function('id', 'idn', n2)
+	numVarFS['node'] = 3
+	numVarFS['id'] = 3
+	featureset.append(Equality(n0,n2))
+	featureset.append(Equality(n1,n2))
+	featureset.append(Equality(id0,id2))
+	featureset.append(Equality(id1,id2))
+	featureset.append(Function('bool', 'leader', n2))
+	featureset.append(Function('bool', 'pending', id0, n2))
+	featureset.append(Function('bool', 'pending', id1, n2))
+	featureset.append(Function('bool', 'pending', id2, n1))
+	featureset.append(Function('bool', 'pending', id2, n0))
+	featureset.append(Function('bool', 'pending', id2, n2))
+	featureset.append(Function('bool', 'le', id1, id2))
+	featureset.append(Function('bool', 'le', id0, id2))
+	featureset.append(Function('bool', 'ring.btw', n0, n1, n2))
+	featureset.append(Function('bool', 'ring.btw', n0, n2, n1))
+	featureset.append(Function('bool', 'ring.btw', n1, n0, n2))
+	featureset.append(Function('bool', 'ring.btw', n1, n2, n0))
+	featureset.append(Function('bool', 'ring.btw', n2, n1, n0))
+	featureset.append(Function('bool', 'ring.btw', n2, n0, n1))
