@@ -12,7 +12,7 @@ def getGraph(unv, interp):
 	# ax = plot.gca()
 	# ax.collections[0].set_edgecolor("#000000")
 	i = 0 
-	g = nx.MultiGraph()
+	g = nx.MultiDiGraph()
 	for sort in unv.keys():  # adding nodes
 		attr = {'sort': sort, 'shape' : nshape[i], 'cnum' : 0} # cnum is color number, <TODO> use colormap to support more than 3 unary relation
 		for const in unv[sort]:
@@ -22,6 +22,7 @@ def getGraph(unv, interp):
 	unary_relOrder = {}
 	bin_relOrder = {}
 	for key, value in sorted(interp.valof.iteritems(), key=lambda (k,v): k.name): # adding edges and colouring nodes
+		# value id of type Const(Predicate)
 		if isinstance(key, li.Function):
 			arity = key.arity() if key.sort=='bool' else key.arity()+1
 			if arity>=3:
@@ -38,7 +39,7 @@ def getGraph(unv, interp):
 					unary_relOrder[tup] = num
 				if value.val=='1':
 					g.nodes[nodes[0]]['cnum'] = g.nodes[nodes[0]]['cnum'] +2**num/8.0
-				if g.nodes[nodes[0]]['cnum'] > 1:  # for cmap to work, values of color should be between 0 to 1
+				if g.nodes[nodes[0]]['cnum'] > 1:  # for cmap to work, values of color should be between 0 to 1 (not necessary. vmin and vmax can be used to specigy range)
 					a = int(g.nodes[nodes[0]]['cnum']*8)%8
 					g.nodes[nodes[0]]['cnum'] = a/8.0
 			else: # add edge
@@ -102,6 +103,6 @@ def plotGraph(graph):
 	ecolor = []
 	for e in graph.edges(keys=True):
 		ecolor.append(graph.edges[e[0],e[1],e[2]]['cnum'])
-	nx.draw_networkx_edges(graph, pos, edge_color=ecolor ,edge_cmap=edge_cmap, edge_vmin=0.0, edge_vmax=1.0)
+	nx.draw_networkx_edges(graph, pos, edge_color=ecolor ,edge_cmap=edge_cmap, edge_vmin=0.0, edge_vmax=1.0, arrows=True, arrowsize=25)
 	nx.draw_networkx_labels(graph, pos=pos)
 

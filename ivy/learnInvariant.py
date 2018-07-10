@@ -33,10 +33,10 @@ numVarFS = {} # number of Variables(quant.) of each sort in feature set (invaria
 numVarInv = {} # number of variables of each sort in learned as well as previous invariant. Used for determining instance size
 candInv = true_clauses()
 coincide = false_clauses()
-silent = False # if True then silent the print statement in sat checking backend
+silent = False # if True then silent the print statement in sat checker (ivy backend)
 
 '''
-:returns a tuple containing universe and pure state.
+	:returns a tuple containing universe and pure state.
 	pure state is again a tuple with 2nd element a clause repr that state
 '''
 def sampleUtil(mod, preclause, fcs, actname):
@@ -49,9 +49,9 @@ def sampleUtil(mod, preclause, fcs, actname):
 	pre = itp.State()
 	pre.clauses = preclause
 	with itp.EvalContext(check=False): # don't check safety
-		post = ag.execute(action, pre, None, actname) # action clauses are added
+		post = ag.execute(action, pre, None, actname) # action clauses are added to preclause here (transition function and preclause)
 		history = ag.get_history(post)
-		gmc = lambda cls, final_cond: itr.small_model_clauses(cls,final_cond,shrink=True)
+		gmc = lambda cls, final_cond: itr.small_model_clauses(cls,final_cond,shrink=True) #shrink=True gives smallest possible sample
 		axioms = mod.background_theory()
 		return history.satisfy(axioms,gmc,fcs)
 
@@ -59,7 +59,7 @@ def sampleUtil(mod, preclause, fcs, actname):
 def sampleNeg(mod, candInv, actname):
 	lcs = mod.labeled_conjs
 	conjs = [Clauses([lc.formula]) for lc in lcs]
-	fcs = [icheck.ConjChecker(c) for c in lcs]  # inverts the fmla
+	fcs = [icheck.ConjChecker(c) for c in lcs]  # also negates the fmla
 	preclause = and_clauses(candInv, *conjs)
 	# print "<plearn> checking for action- ", actname
 	res = sampleUtil(mod, preclause, fcs, actname)
@@ -93,10 +93,10 @@ def learnWeekestInv(mod, clf, actname):
 		spos, sneg = Sample(spos,'1'), Sample(sneg,'0') 
 		print "Pos Sample", spos.unv.unvsize() if hasattr(spos, 'interp') else None
 		print "Neg Sample", sneg.unv.unvsize() if hasattr(sneg, 'interp') else None
-		# if hasattr(spos, 'interp'): # spos is not null
-			# print "<plearn> + sample interpretation : ",spos.interp, "\n" # for detailed information
-			# spos.displaySample()
-		# if hasattr(sneg, 'interp'): # sneg is not null
+		if hasattr(spos, 'interp'): # spos is not None
+			print "<plearn> + sample interpretation : ",spos.interp, "\n" # for detailed information
+			spos.displaySample() # for displaying the sample
+		# if hasattr(sneg, 'interp'): # sneg is not None
 			# print "<plearn> - sample interpretation : ",sneg.interp, "\n" # for detailed information
 			# sneg.displaySample()
 		clf.addSample(spos) # adding Positive sample
@@ -156,7 +156,7 @@ def checkInitialCond(mod):
 
 
 def testfunc(mod):
-	
+	# for testing/ debugging
 	ns = logic.UninterpretedSort("node")
 	ids = logic.UninterpretedSort('id')
 	n1 = logic.Var('Node0', ns)
@@ -188,6 +188,7 @@ def testfunc(mod):
 
 def updatenvi(mod):
 	''' nvi = NumVarInv
+		it just calculates the number of quantified variables of each sort in the fcs.
 	'''
 	lcs = mod.labeled_conjs
 	varsof = {}
@@ -310,7 +311,7 @@ def predToivyFmla(pred):
 class Universe:
 	'''
 	Nothing but a dictionary where key = sort name (str)
-	value = list of values (Const obj) each sort can take in the model
+	value = list of values (Const(Predicate) obj) each sort can take in the model
 	'''
 	def __init__(self, unv):
 		self.unv = {}
@@ -350,8 +351,10 @@ class Universe:
 
 
 class Sample:
-	''' a Sample refers to the model returned by z3.From a model many samplePoint can be extracted	by iterating through instance variable
+	''' a Sample refers to the model returned by z3. From a model many samplePoint can be extracted	by iterating through instance variable
 	instance variable refers to the value of each universally quantified variable (for eg n1, n2)
+	in simple terms model = universe + interpretation. model with self.hasIterated being false is Sample. model + self.instance = samplePoint
+	to get different samplePoint vary the self.instance by calling next. 
 	'''
 	def __init__(self, model, label):
 		if model is not None:
@@ -448,11 +451,6 @@ class Sample:
 			t1, t2 = self.solveFormula(fmla.args[0]), self.solveFormula(fmla.args[1])
 			return Const('bool','1' if t1==t2 else '0')
 
-	# def validateUnv(self):
-	# 	global maxUniverse
-	# 	for key in self.unv.keys():
-	# 		assert len(self.unv[key]) <= len(maxUniverse[key]), "sample has bigger univ than maxunv on sort "+key  
-
 
 	def addto(self, sortnum):
 		s_inst = self.instance[sortnum] # python copies list by reference
@@ -468,6 +466,8 @@ class Sample:
 
 
 	def next(self):
+		''' called during for loop iteration to generate new instance
+		'''
 		if not self.hasIterated:
 			self.hasIterated = True
 			return self
@@ -482,7 +482,8 @@ class Sample:
 
 	
 	def isValid(self):
-		''' Checks if the current instance is a valid samplePoint
+		''' Checks if the current instance is a valid samplePoint. 
+			i.e. for negative sample it checks if the samplePoint satisfies negation of current invariant (fcs) in post state
 			Assumptions : safety Condition and Candidate Inv is Universally Quantified.
 		'''
 		global module, candInv, coincide
@@ -490,12 +491,13 @@ class Sample:
 			fcs = [icheck.ConjChecker(c) for c in module.labeled_conjs]  # inverts the fmla
 			fmlas = [fc.cond().fmlas for fc in fcs] # fc.cond().fmlas gives a list of ivy predicate logic.
 		else:
-			return True # It will cause repeatation of some positive samples, but it will not change the correctness of algorithm 
+			return True # It will cause repeatation of some positive samples, but it will not affect the correctness of algorithm 
+			# comment the above return stmt to avoid repeating positive samples. 
 			negateci, negateCoincide = negate_clauses(candInv), negate_clauses(coincide)
 			condition = and_clauses(negateci, negateCoincide)
 			fmlas = [condition.fmlas]
-			print "<plearn> printing condition to check valid positive samplePoint", condition
-		for fmla in fmlas: # requires to satisfy atleast one fmla
+			# print "<plearn> printing condition to check valid positive samplePoint", condition
+		for fmla in fmlas: # requires satisfying atleast one fmla, as they are in disjunction 
 			isfmlatrue = True
 			for pred in fmla:
 				ret = self.solveIvyfmla(pred)
@@ -514,14 +516,15 @@ class Sample:
 
 	def initInstance(self):
 		'''
-		self.instance is a list of list of int. where each element of list represent value of all (universally quantified) variables of a sort
-		to make sense of an instance universe is needed
-		for eg self.instance['node'][1] = 0 then value of Node1 is self.unv.get('node','0') which would usually be node:Const(0)
+		self.instance is a list of list of int. where each element of self.instance represent value of all (universally quantified) variables of a sort
+		to make sense of an instance universe is needed.
+		for eg if self.instance['node'][1] = 0 then value of Node1 is self.unv.get('node','0') which would usually be node:Const(0) Const(Predicate) object
+		instance along with universe is used to calculate the value of predicate in featureset and checking validity of samplePoint
 		'''
 		global numVarFS, numVarInv
 		self.instance, self.enumeration, self.pos, self.sortpos, self.sortat = [], [], [], {}, []
 		i = 0
-		for sort in self.unv.keys(): # <TODO> check if working.
+		for sort in sorted(self.unv.keys()):
 			instsize = max(numVarFS.get(sort,0), numVarInv.get(sort,0)) # size of the instance depends on feature set and Previous Invariant size (for validation)
 			self.instance.append([0]*instsize)
 			self.sortpos[sort] = i # constant
@@ -543,7 +546,6 @@ class Sample:
 class Classifier:
 
 	def __init__(self):
-		# self.label = [] # each element is 0('false')- or 1('true')+ or
 		self.posSamples = []
 		self.negSamples = []
 		self.posDataPoints = set() # each element is tuple containg values of feature set
@@ -552,13 +554,13 @@ class Classifier:
 		self.clf = tree.DecisionTreeClassifier()
 
 	def learn(self):
-		self.clf.fit(list(self.posDataPoints)+list(self.negDataPoints), ['1']*len(self.posDataPoints)+['0']*len(self.negDataPoints))
+		self.clf.fit(list(self.posDataPoints)+list(self.negDataPoints), ['1']*len(self.posDataPoints)+['0']*len(self.negDataPoints)) #sklearn library
 		return self.toClauses(), self.conflictToClause()
 
 	def addSample(self,sample):
 		'''
-		A sample is a model and label (object of class Sample). A samplePoint is a model and label(= Sample) with a concrete instance (sample.instance denoting some meaningful value)(object of class Sample).
-		A sample generally have multiple samplePoint. difference between two samplePoint belonging to same sample is only instance i.e. values of quantified variable.
+		A sample is a model + label (object of class Sample). A samplePoint is a model + label(= Sample) with a concrete instance (sample.instance denoting some meaningful value)(object of class Sample).
+		A sample generally have multiple samplePoint. difference between two samplePoint belonging to same sample is only in instance variable i.e. values of quantified variable.
 		As samplePoint has value of each quantified variable we can get value of each predicates in feature set to get dataPoint. 
 		Each samplePoint is then converted to dataPoint which is abstraction of samplePoint by feature set i.e. value of features.
 		'''
@@ -574,7 +576,7 @@ class Classifier:
 					continue
 				dataPoint = tuple([samplePoint.solveFormula(fmla).val for fmla in featureset])
 				# print "<plearn> dataPoint is ", dataPoint
-				if sample.label=='1':
+				if sample.label=='1': # positve sample
 					if dataPoint in self.cnflDataPoints or dataPoint in self.posDataPoints:
 						continue
 					if dataPoint in self.negDataPoints:
@@ -582,7 +584,7 @@ class Classifier:
 						continue
 					self.posDataPoints.add(dataPoint)
 					newPoints.append(dataPoint)
-				else:
+				else: # negative sample
 					if dataPoint in self.cnflDataPoints or dataPoint in self.negDataPoints:
 						continue
 					if dataPoint in self.posDataPoints:
@@ -596,11 +598,13 @@ class Classifier:
 	def toClauses(self):
 		''' converts decision tree to Clause. 
 		'''
-		bintree = self.clf.tree_
+		bintree = self.clf.tree_  # the underlying decision tree of clf
 		# first we will build a formula and then build a Clause
 		def tofmla(node):
+			''' encodes the subtree with root represented by node to fmla
+				node is of type int
+			'''
 			global featureset
-			"""node is of type int"""
 			if bintree.children_right[node] != bintree.children_left[node]: # not a leaf
 				assert bintree.feature[node] != _tree.TREE_UNDEFINED, "parent node uses undefined feature"
 				assert isinstance(bintree.feature[node], int), "feature returned is not int"
@@ -610,7 +614,7 @@ class Classifier:
 				ivyFeat = predToivyFmla(feat)
 				fmlaleft = tofmla(bintree.children_left[node]) # leaft branch means case when ivyFeat is false
 				fmlaright = tofmla(bintree.children_right[node])
-				if fmlaright==logic.And():
+				if fmlaright==logic.And(): # fmlaright == True
 					return simplifyOr(ivyFeat, fmlaleft)
 				if fmlaleft==logic.And():
 					return simplifyOr(logic.Not(ivyFeat), fmlaright)
@@ -689,7 +693,13 @@ class Classifier:
 
 
 class Interpretation:
-	"""Contains the values for each relation, function and constant in the model stored as dict"""
+	"""Contains the values for each relation, function and constant in the model stored as dict
+		explained for client server program:
+		for eg. on abstract level interpretaion will contain value of leader(node:Const(0)) as either bool:Const(0) (# false) or bool:Const(1) (# true)
+		similarly it will have value of pending(id:Const(0), node:Const(1)) as either bool:Const(0) (# false) or bool:Const(1) (# true)
+		similarly it will have value of idn(node:Const(0)) as some Const(Predicate) object (for eg id:Const(1))
+		in short interpretation has value of all relation, function (that are in the input program) for all arguments. 
+	"""
 	
 	'''
 	:param fmlas: is a list of formulas (logic.Or/Not/Eq/Apply) depicting value of each relation, function, Constant
@@ -707,6 +717,9 @@ class Interpretation:
 
 
 	def translate(self,fmla):
+		''' this function acts as a parser which parses the fmla in state interpretation returned by ivy
+			returns either None (no extra info or redundant info) or a tuple
+		'''
 		if isinstance(fmla, logic.Or): # this info is captured by universe Itself
 			return None				   # No need for redundant data
 		if isinstance(fmla, logic.Apply):
@@ -760,8 +773,9 @@ class Predicate:
 
 
 class Var(Predicate):
-	'''Is used to represent elements in instance only'''
-	# leaf
+	'''Is used to represent elements in instance only
+		Used to represent universally quantifued variables
+	'''
 	def __init__(self,sort, name, num):
 		self.sort = sort # str
 		self.name = name
@@ -778,10 +792,9 @@ class Var(Predicate):
 
 
 class Const(Predicate):
-	#leaf
 	def __init__(self,sort,val, name=None):
 		self.sort = sort
-		self.val = val  # gen a str
+		self.val = val  # generally a str
 		self.name = name
 
 	@classmethod
@@ -827,6 +840,7 @@ class Function(Predicate):
 		return len(self.args)
 
 class Relation(Predicate):
+	# redundant as of now, all relations are modeled as function wih return type bool
 	def __init__(self,name,*args):
 		self.sort = 'bool' # TODO verify from interp
 		self.name = name
