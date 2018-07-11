@@ -1,8 +1,8 @@
 '''
 Important abbreviations:
-	fmla = Formula
+	fmla = Formula # mainly used to denote ivy predicate logic, but is also used to denote object of class Predicate defined in learnInvariant
 	lcs = labeled clauses
-	fcs = final Conditions
+	fcs = final Conditions = conjectures + invariant + prev learned Invariant 
 	clf = classifier
 	mod = module
 	pred = predicate 
@@ -22,6 +22,7 @@ import logic
 from logic import BooleanSort
 import ivy_ast
 import display_sample as ds
+import ivy_utils as iu
 
 # <TODO> No such assumption as universe cannot be empty
 # <TODO> support for enumerated sort
@@ -34,6 +35,7 @@ numVarInv = {} # number of variables of each sort in learned as well as previous
 candInv = true_clauses()
 coincide = false_clauses()
 silent = False # if True then silent the print statement in sat checker (ivy backend)
+enum = iu.BooleanParameter("enum",False)
 
 '''
 	:returns a tuple containing universe and pure state.
@@ -63,6 +65,7 @@ def sampleNeg(mod, candInv, actname):
 	preclause = and_clauses(candInv, *conjs)
 	# print "<plearn> checking for action- ", actname
 	res = sampleUtil(mod, preclause, fcs, actname)
+	# print candInv
 	# a = raw_input('tried for neg sample')
 	return res
 
@@ -73,9 +76,11 @@ def samplePos(mod, candInv, coincide, actname):
 	negateci, negateCoincide = negate_clauses(candInv), negate_clauses(coincide)
 	assert isinstance(negateci, Clauses) and isinstance(negateCoincide, Clauses), "negation causes type change" 
 	preclause = and_clauses(negateci, negateCoincide, *conjs)
+	print "preclause: ",preclause
+	print "not coincide: ", negateCoincide
 	# print "<plearn> checking for action+ ", actname
 	res = sampleUtil(mod, preclause, fcs, actname)
-	# a = raw_input('tried for pos sample')
+	a = raw_input('tried for pos sample')
 	return res
 
 def learnWeekestInv(mod, clf, actname):
@@ -118,7 +123,7 @@ def learnWeekestInv(mod, clf, actname):
 def learnInv(mod):
 	print "\n"*2
 	print "<plearn> Directed to learning Algorithm"
-	global silent, module
+	global silent, module, numVarFS, featureset
 	silent = True
 	updatenvi(mod)
 	module = mod
@@ -133,16 +138,18 @@ def learnInv(mod):
 		# testfunc(mod)
 		for actname in sorted(mod.public_actions):
 			print "learning Invariant for action {}".format(actname)
-			clf = Classifier()
+			clf = Classifier() # new classifier
 			newInv = learnWeekestInv(mod,clf, actname)
 			print "\n"*2
 			print "<plearn> new Invariant:", newInv
 			a = raw_input('new Invariant learned, press enter to continue')
 			print "\n"*2
+			numVarFS = {} # resetting numVarFS
+			featureset = [] # resetting featuerset
 			if newInv != true_clauses():
 				lf = ivy_ast.LabeledFormula(*[ivy_ast.Atom('learnedInv'+actname), logic.And(*newInv.fmlas)])
 				mod.labeled_conjs.append(lf)  # modifying mod and module, obj are copied by refr.
-				updatenvi(mod)
+				updatenvi(mod) # takes care of numVarInv
 
 def checkInitialCond(mod):
 	print "\nChecking if Initialization establishes the learned invariants"
@@ -444,7 +451,7 @@ class Sample:
 		for i in range(self.numsort):
 			if self.addto(i):
 				return self
-			if i == self.numsort-1:
+			if i == self.numsort-1: # <bhavya> for leader election only
 				raise StopIteration
 
 	def __iter__(self):
@@ -454,19 +461,19 @@ class Sample:
 	def isValid(self):
 		''' Checks if the current instance is a valid samplePoint. 
 			i.e. for negative sample it checks if the samplePoint satisfies negation of current invariant (fcs) in post state
-			Assumptions : safety Condition and Candidate Inv is Universally Quantified.
+			Assumptions : safety Condition and Candidate Inv and Coincide clause is Universally Quantified.
 		'''
 		global module, candInv, coincide
-		if self.label == '0':
+		if self.label == '0': # nagative sample
 			fcs = [icheck.ConjChecker(c) for c in module.labeled_conjs]  # inverts the fmla
-			fmlas = [fc.cond().fmlas for fc in fcs] # fc.cond().fmlas gives a list of ivy predicate logic.
-		else:
-			return True # It will cause repeatation of some positive samples, but it will not affect the correctness of algorithm 
-			# comment the above return stmt to avoid repeating positive samples. 
+			fmlas = [fc.cond().fmlas for fc in fcs] # fc.cond().fmlas gives a list of ivy predicate logic object.
+		else: # positive sample
+			# return True # It will cause repeatation of some positive samples, but it will not affect the correctness of algorithm 
+			# comment the above return stmt to check validity of positive samples 
 			negateci, negateCoincide = negate_clauses(candInv), negate_clauses(coincide)
 			condition = and_clauses(negateci, negateCoincide)
 			fmlas = [condition.fmlas]
-			# print "<plearn> printing condition to check valid positive samplePoint", condition
+			# assert len(fmlas) == 1, "" 
 		for fmla in fmlas: # requires satisfying atleast one fmla, as they are in disjunction 
 			isfmlatrue = True
 			for pred in fmla:
@@ -494,7 +501,7 @@ class Sample:
 		global numVarFS, numVarInv
 		self.instance, self.enumeration, self.pos, self.sortpos, self.sortat = [], [], [], {}, []
 		i = 0
-		for sort in sorted(self.unv.keys()):
+		for sort in sorted(self.unv.keys(), reverse=True):
 			instsize = max(numVarFS.get(sort,0), numVarInv.get(sort,0)) # size of the instance depends on feature set and Previous Invariant size (for validation)
 			self.instance.append([0]*instsize)
 			self.sortpos[sort] = i # constant
@@ -554,6 +561,9 @@ class Classifier:
 						continue
 					self.posDataPoints.add(dataPoint)
 					newPoints.append(dataPoint)
+					if not enum.get(): # do not enumerate, translates to stop when first dataPoint is found
+						print "sample.instance: ", samplePoint.instance
+						break
 				else: # negative sample
 					if dataPoint in self.cnflDataPoints or dataPoint in self.negDataPoints:
 						continue
@@ -562,6 +572,9 @@ class Classifier:
 						self.cnflDataPoints.add(dataPoint)
 					self.negDataPoints.add(dataPoint)
 					newPoints.append(dataPoint)
+					if not enum.get():
+						print "sample.instance: ", samplePoint.instance
+						break
 			print "New {} sample points added = {}".format("+" if sample.label=='1' else "-", newPoints)
 
 
@@ -582,7 +595,7 @@ class Classifier:
 				assert not (threshold == 0 or threshold==1), "threshold=({}, {}) adds no information".format(type(threshold), threshold) 
 				feat = featureset[bintree.feature[node]] # object of class Predicate
 				ivyFeat = predToivyFmla(feat)
-				fmlaleft = tofmla(bintree.children_left[node]) # leaft branch means case when ivyFeat is false
+				fmlaleft = tofmla(bintree.children_left[node]) # left branch means case when ivyFeat is false
 				fmlaright = tofmla(bintree.children_right[node])
 				if fmlaright==logic.And(): # fmlaright == True
 					return simplifyOr(ivyFeat, fmlaleft)
